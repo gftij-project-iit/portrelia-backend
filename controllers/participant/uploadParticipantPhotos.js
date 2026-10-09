@@ -1,31 +1,47 @@
-const fs = require("fs/promises");
-const path = require("path");
 const crypto = require("crypto");
+
 const { db } = require("../../config/db");
+const { supabase } = require("../../config/supabase");
 
 const MIN_PHOTOS = 6;
 const MAX_PHOTOS = 12;
 
-/*
- * =========================================================
- * DOSSIER LOCAL DES PHOTOS
- * =========================================================
- */
-const UPLOAD_ROOT = path.resolve(
-  __dirname,
-  "../../uploads/participants"
-);
+const STORAGE_BUCKET =
+  process.env.SUPABASE_STORAGE_BUCKET;
+
 
 /*
  * =========================================================
- * VÉRIFICATION DU VRAI CONTENU IMAGE
+ * VÉRIFICATION CONFIGURATION STORAGE
  * =========================================================
  */
-const isValidImageBuffer = (buffer, mimetype) => {
-  if (!buffer || buffer.length < 12) {
+if (!STORAGE_BUCKET) {
+  throw new Error(
+    "SUPABASE_STORAGE_BUCKET manquant dans le .env"
+  );
+}
+
+
+/*
+ * =========================================================
+ * VÉRIFICATION DU CONTENU RÉEL DE L'IMAGE
+ * =========================================================
+ */
+const isValidImageBuffer = (
+  buffer,
+  mimetype
+) => {
+  if (
+    !buffer ||
+    !Buffer.isBuffer(buffer) ||
+    buffer.length < 12
+  ) {
     return false;
   }
 
+  /*
+   * JPEG
+   */
   if (mimetype === "image/jpeg") {
     return (
       buffer[0] === 0xff &&
@@ -34,6 +50,9 @@ const isValidImageBuffer = (buffer, mimetype) => {
     );
   }
 
+  /*
+   * PNG
+   */
   if (mimetype === "image/png") {
     return (
       buffer[0] === 0x89 &&
@@ -43,117 +62,165 @@ const isValidImageBuffer = (buffer, mimetype) => {
     );
   }
 
+  /*
+   * WEBP
+   */
   if (mimetype === "image/webp") {
     return (
-      buffer.subarray(0, 4).toString() === "RIFF" &&
-      buffer.subarray(8, 12).toString() === "WEBP"
+      buffer
+        .subarray(0, 4)
+        .toString() === "RIFF" &&
+      buffer
+        .subarray(8, 12)
+        .toString() === "WEBP"
     );
   }
 
   return false;
 };
 
+
 /*
  * =========================================================
- * EXTENSION SELON LE MIMETYPE
+ * EXTENSION SÉCURISÉE SELON LE MIME TYPE
  * =========================================================
  */
 const getExtension = (mimetype) => {
-  if (mimetype === "image/jpeg") {
-    return ".jpg";
-  }
+  const extensions = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+  };
 
-  if (mimetype === "image/png") {
-    return ".png";
-  }
-
-  if (mimetype === "image/webp") {
-    return ".webp";
-  }
-
-  return null;
+  return extensions[mimetype] || null;
 };
+
 
 /*
  * =========================================================
- * UPLOAD DES PHOTOS PARTICIPANT
+ * SUPPRESSION STORAGE EN CAS DE ROLLBACK
  * =========================================================
  */
-const uploadParticipantPhotos = async (req, res) => {
-  const client = await db.connect();
-  const writtenFiles = [];
-
-  /*
-   * =========================================================
-   * DEBUG MULTER
-   * =========================================================
-   *
-   * Ces logs permettent de vérifier si Multer
-   * a réellement reçu et parsé les fichiers.
-   */
-  console.log("\n================ PHOTO UPLOAD ================");
-  console.log("CONTENT-TYPE :", req.headers["content-type"]);
-  console.log("PARAM TOKEN :", req.params?.token);
-  console.log("PARTICIPANT ACCESS :", req.participantAccess);
-  console.log("REQ BODY :", req.body);
-  console.log("REQ FILES EXISTS :", Boolean(req.files));
-  console.log("REQ FILES TYPE :", typeof req.files);
-  console.log(
-    "REQ FILES COUNT :",
-    Array.isArray(req.files)
-      ? req.files.length
-      : "NOT ARRAY"
-  );
-
-  if (Array.isArray(req.files)) {
-    req.files.forEach((file, index) => {
-      console.log(`FILE ${index + 1} :`, {
-        fieldname: file.fieldname,
-        originalname: file.originalname,
-        mimetype: file.mimetype,
-        size: file.size,
-        hasBuffer: Boolean(file.buffer),
-        bufferLength: file.buffer?.length,
-      });
-    });
+const cleanupSupabaseFiles = async (
+  storageKeys
+) => {
+  if (
+    !Array.isArray(storageKeys) ||
+    storageKeys.length === 0
+  ) {
+    return;
   }
 
-  console.log("==============================================\n");
+  try {
+    const { error } =
+      await supabase.storage
+        .from(STORAGE_BUCKET)
+        .remove(storageKeys);
+
+    if (error) {
+      console.error(
+        "SUPABASE STORAGE CLEANUP ERROR :",
+        error
+      );
+
+      return;
+    }
+
+    console.log(
+      "SUPABASE STORAGE CLEANUP SUCCESS :",
+      storageKeys.length,
+      "fichier(s)"
+    );
+  } catch (error) {
+    console.error(
+      "SUPABASE STORAGE CLEANUP EXCEPTION :",
+      error
+    );
+  }
+};
+
+
+/*
+ * =========================================================
+ * UPLOAD PHOTOS PARTICIPANT
+ * =========================================================
+ *
+ * POST
+ * /api/v1/participant/invitations/:token/photos
+ *
+ * Multer doit avoir exécuté :
+ *
+ * upload.array("photos", 12)
+ *
+ * avec :
+ *
+ * multer.memoryStorage()
+ *
+ * Les fichiers sont donc disponibles dans :
+ *
+ * req.files
+ *
+ * et leur contenu dans :
+ *
+ * file.buffer
+ */
+const uploadParticipantPhotos = async (
+  req,
+  res
+) => {
+  const client = await db.connect();
+
+  /*
+   * Liste des fichiers réellement créés
+   * dans Supabase pendant cette requête.
+   *
+   * Si PostgreSQL échoue ensuite,
+   * on pourra les supprimer.
+   */
+  const uploadedStorageKeys = [];
+
+  let transactionStarted = false;
 
   try {
-    const access = req.participantAccess;
-    const files = Array.isArray(req.files)
+    const access =
+      req.participantAccess;
+
+    const files = Array.isArray(
+      req.files
+    )
       ? req.files
       : [];
 
+    console.log(
+      "\n=============== PHOTO UPLOAD ==============="
+    );
+
+    console.log(
+      "CONTENT-TYPE :",
+      req.headers["content-type"]
+    );
+
+    console.log(
+      "PARTICIPANT ID :",
+      access?.participant_id
+    );
+
+    console.log(
+      "PARTICIPANT STATUS :",
+      access?.participant_status
+    );
+
+    console.log(
+      "FILES COUNT :",
+      files.length
+    );
+
     /*
-     * Si ceci arrive, le problème est avant
-     * le controller : Multer n'a pas injecté
-     * les fichiers dans req.files.
+     * =====================================================
+     * 1. ACCÈS PARTICIPANT
+     * =====================================================
      */
-    if (files.length === 0) {
-      console.error(
-        "UPLOAD STOPPED : aucun fichier présent dans req.files"
-      );
-
-      return res.status(400).json({
-        success: false,
-        message: "Aucune photo reçue",
-        debug: {
-          contentType:
-            req.headers["content-type"] || null,
-          filesDefined:
-            req.files !== undefined,
-          filesCount: files.length,
-        },
-      });
-    }
-
     if (!access) {
-      console.error(
-        "UPLOAD STOPPED : req.participantAccess absent"
-      );
-
       return res.status(401).json({
         success: false,
         message:
@@ -161,28 +228,60 @@ const uploadParticipantPhotos = async (req, res) => {
       });
     }
 
-    console.log(
-      "PARTICIPANT STATUS :",
-      access.participant_status
-    );
+    /*
+     * =====================================================
+     * 2. FICHIERS MULTER
+     * =====================================================
+     */
+    if (files.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Aucune photo reçue",
+      });
+    }
 
     /*
-     * Une fois les photos soumises,
-     * le participant ne peut plus
-     * modifier son dossier.
+     * Vérification supplémentaire :
+     * avec memoryStorage, chaque fichier
+     * doit avoir un Buffer.
      */
-    if (
-      ![
-        "INVITED",
-        "CONSENT_PENDING",
-        "PHOTOS_PENDING",
-      ].includes(access.participant_status)
-    ) {
-      console.error(
-        "UPLOAD BLOCKED BY STATUS :",
-        access.participant_status
+    const missingBuffer =
+      files.some(
+        (file) =>
+          !Buffer.isBuffer(
+            file.buffer
+          )
       );
 
+    if (missingBuffer) {
+      console.error(
+        "MULTER ERROR : buffer manquant"
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Configuration upload invalide",
+      });
+    }
+
+    /*
+     * =====================================================
+     * 3. STATUT PARTICIPANT
+     * =====================================================
+     */
+    const allowedStatuses = [
+      "INVITED",
+      "CONSENT_PENDING",
+      "PHOTOS_PENDING",
+    ];
+
+    if (
+      !allowedStatuses.includes(
+        access.participant_status
+      )
+    ) {
       return res.status(409).json({
         success: false,
         message:
@@ -190,52 +289,72 @@ const uploadParticipantPhotos = async (req, res) => {
       });
     }
 
+    /*
+     * =====================================================
+     * 4. TRANSACTION POSTGRESQL
+     * =====================================================
+     */
     await client.query("BEGIN");
 
-    console.log(
-      "TRANSACTION BEGIN"
-    );
+    transactionStarted = true;
 
     /*
-     * Nombre de photos déjà présentes.
+     * =====================================================
+     * 5. COMPTER LES PHOTOS EXISTANTES
+     * =====================================================
      */
-    const countResult = await client.query(
-      `
-      SELECT
-        COUNT(*)::INTEGER AS count
-      FROM input_photos
-      WHERE participant_id = $1
-      `,
-      [access.participant_id]
-    );
+    const countResult =
+      await client.query(
+        `
+        SELECT
+          COUNT(*)::INTEGER AS count
+        FROM input_photos
+        WHERE participant_id = $1
+        `,
+        [
+          access.participant_id,
+        ]
+      );
 
     const existingCount =
-      countResult.rows[0].count;
+      Number(
+        countResult.rows[0]
+          ?.count || 0
+      );
+
+    const totalAfterUpload =
+      existingCount +
+      files.length;
 
     console.log(
-      "EXISTING PHOTOS COUNT :",
+      "EXISTING PHOTOS :",
       existingCount
     );
 
     console.log(
-      "NEW FILES COUNT :",
+      "NEW PHOTOS :",
       files.length
     );
 
     console.log(
       "TOTAL AFTER UPLOAD :",
-      existingCount + files.length
+      totalAfterUpload
     );
 
+    /*
+     * =====================================================
+     * 6. MAXIMUM 12 PHOTOS
+     * =====================================================
+     */
     if (
-      existingCount + files.length >
+      totalAfterUpload >
       MAX_PHOTOS
     ) {
-      await client.query("ROLLBACK");
-
-      console.error(
-        "UPLOAD BLOCKED : maximum photos dépassé"
+      await client.query(
+        "ROLLBACK"
       );
+
+      transactionStarted = false;
 
       return res.status(400).json({
         success: false,
@@ -244,38 +363,12 @@ const uploadParticipantPhotos = async (req, res) => {
       });
     }
 
-    /*
-     * =========================================================
-     * DOSSIER DU PARTICIPANT
-     * =========================================================
-     */
-    const participantDirectory = path.join(
-      UPLOAD_ROOT,
-      String(access.participant_id)
-    );
-
-    console.log(
-      "PARTICIPANT DIRECTORY :",
-      participantDirectory
-    );
-
-    await fs.mkdir(
-      participantDirectory,
-      {
-        recursive: true,
-      }
-    );
-
-    console.log(
-      "PARTICIPANT DIRECTORY READY"
-    );
-
     const createdPhotos = [];
 
     /*
-     * =========================================================
-     * ENREGISTREMENT DE CHAQUE PHOTO
-     * =========================================================
+     * =====================================================
+     * 7. TRAITEMENT DES FICHIERS
+     * =====================================================
      */
     for (const file of files) {
       console.log(
@@ -284,8 +377,7 @@ const uploadParticipantPhotos = async (req, res) => {
       );
 
       /*
-       * Vérification réelle
-       * du contenu du fichier.
+       * Validation du contenu réel.
        */
       const validImage =
         isValidImageBuffer(
@@ -293,95 +385,119 @@ const uploadParticipantPhotos = async (req, res) => {
           file.mimetype
         );
 
-      console.log(
-        "IMAGE BUFFER VALID :",
-        validImage
-      );
-
       if (!validImage) {
         throw new Error(
           `Le fichier "${file.originalname}" n'est pas une image valide`
         );
       }
 
+      /*
+       * Extension basée sur le MIME,
+       * pas sur le nom envoyé par
+       * l'utilisateur.
+       */
       const extension =
         getExtension(
           file.mimetype
         );
 
-      console.log(
-        "FILE EXTENSION :",
-        extension
-      );
-
       if (!extension) {
         throw new Error(
-          "Format de fichier non supporté"
+          `Format non supporté pour "${file.originalname}"`
         );
       }
 
       /*
-       * Nom physique sécurisé.
+       * Nom généré côté serveur.
        */
       const fileName =
         `${crypto.randomUUID()}${extension}`;
 
-      const absolutePath =
-        path.join(
-          participantDirectory,
-          fileName
-        );
-
+      /*
+       * Le bucket s'appelle :
+       *
+       * participant-photos
+       *
+       * Donc storageKey ne doit PAS
+       * contenir le nom du bucket.
+       *
+       * Résultat :
+       *
+       * participants/2/uuid.png
+       */
       const storageKey =
-        path
-          .join(
-            "uploads",
-            "participants",
-            String(
-              access.participant_id
-            ),
-            fileName
-          )
-          .replace(/\\/g, "/");
+        [
+          "participants",
+          String(
+            access.participant_id
+          ),
+          fileName,
+        ].join("/");
 
       console.log(
-        "FILE GENERATED NAME :",
-        fileName
-      );
-
-      console.log(
-        "FILE ABSOLUTE PATH :",
-        absolutePath
-      );
-
-      console.log(
-        "FILE STORAGE KEY :",
+        "SUPABASE STORAGE KEY :",
         storageKey
       );
 
       /*
-       * =========================================================
-       * ÉCRITURE PHYSIQUE
-       * =========================================================
+       * ===================================================
+       * 8. UPLOAD SUPABASE STORAGE
+       * ===================================================
        */
-      await fs.writeFile(
-        absolutePath,
-        file.buffer
-      );
+      const {
+        data: storageData,
+        error: storageError,
+      } =
+        await supabase.storage
+          .from(
+            STORAGE_BUCKET
+          )
+          .upload(
+            storageKey,
+            file.buffer,
+            {
+              contentType:
+                file.mimetype,
 
-      writtenFiles.push(
-        absolutePath
+              /*
+               * Ne jamais écraser une
+               * photo existante.
+               */
+              upsert: false,
+
+              /*
+               * Cache navigateur/CDN.
+               */
+              cacheControl:
+                "3600",
+            }
+          );
+
+      if (storageError) {
+        console.error(
+          "SUPABASE STORAGE UPLOAD ERROR :",
+          storageError
+        );
+
+        throw new Error(
+          `Impossible de stocker "${file.originalname}"`
+        );
+      }
+
+      uploadedStorageKeys.push(
+        storageKey
       );
 
       console.log(
-        "FILE WRITTEN SUCCESSFULLY :",
-        absolutePath
+        "SUPABASE STORAGE UPLOAD SUCCESS :",
+        storageData?.path ||
+          storageKey
       );
 
       /*
-       * =========================================================
-       * INSERT POSTGRESQL
-       * =========================================================
+       * ===================================================
+       * 9. INSERT POSTGRESQL
+       * ===================================================
        */
       const photoResult =
         await client.query(
@@ -395,25 +511,42 @@ const uploadParticipantPhotos = async (req, res) => {
             size_bytes,
             status
           )
+
           VALUES (
             $1,
-            'LOCAL',
+            'SUPABASE',
             $2,
             $3,
             $4,
             $5,
             'UPLOADED'
           )
+
           RETURNING
             id,
-            participant_id AS "participantId",
-            storage_provider AS "storageProvider",
-            storage_key AS "storageKey",
-            original_filename AS "originalFilename",
-            mime_type AS "mimeType",
-            size_bytes AS "sizeBytes",
+
+            participant_id
+              AS "participantId",
+
+            storage_provider
+              AS "storageProvider",
+
+            storage_key
+              AS "storageKey",
+
+            original_filename
+              AS "originalFilename",
+
+            mime_type
+              AS "mimeType",
+
+            size_bytes
+              AS "sizeBytes",
+
             status,
-            created_at AS "createdAt"
+
+            created_at
+              AS "createdAt"
           `,
           [
             access.participant_id,
@@ -427,25 +560,35 @@ const uploadParticipantPhotos = async (req, res) => {
       const createdPhoto =
         photoResult.rows[0];
 
-      console.log(
-        "DB PHOTO CREATED :",
+      createdPhotos.push(
         createdPhoto
       );
 
-      createdPhotos.push(
-        createdPhoto
+      console.log(
+        "DB PHOTO CREATED :",
+        {
+          id:
+            createdPhoto.id,
+
+          provider:
+            createdPhoto.storageProvider,
+
+          storageKey:
+            createdPhoto.storageKey,
+        }
       );
     }
 
     /*
-     * =========================================================
-     * STATUT PARTICIPANT
-     * =========================================================
+     * =====================================================
+     * 10. MISE À JOUR DU PARTICIPANT
+     * =====================================================
      */
     const participantResult =
       await client.query(
         `
         UPDATE participants
+
         SET
           status =
             CASE
@@ -453,10 +596,14 @@ const uploadParticipantPhotos = async (req, res) => {
                 'INVITED',
                 'CONSENT_PENDING'
               )
+
               THEN 'PHOTOS_PENDING'
+
               ELSE status
             END
+
         WHERE id = $1
+
         RETURNING
           id,
           status
@@ -466,35 +613,42 @@ const uploadParticipantPhotos = async (req, res) => {
         ]
       );
 
-    console.log(
-      "PARTICIPANT UPDATED :",
-      participantResult.rows[0]
+    /*
+     * =====================================================
+     * 11. COMMIT DB
+     * =====================================================
+     */
+    await client.query(
+      "COMMIT"
     );
 
-    /*
-     * =========================================================
-     * COMMIT
-     * =========================================================
-     */
-    await client.query("COMMIT");
+    transactionStarted = false;
 
     console.log(
       "UPLOAD COMMIT SUCCESS"
     );
 
     console.log(
-      "CREATED PHOTOS :",
-      createdPhotos
+      "PARTICIPANT STATUS :",
+      participantResult.rows[0]
+        ?.status
     );
 
     console.log(
-      "PHOTO UPLOAD COMPLETED\n"
+      "=============== UPLOAD SUCCESS ===============\n"
     );
 
+    /*
+     * =====================================================
+     * 12. RÉPONSE
+     * =====================================================
+     */
     return res.status(201).json({
       success: true,
+
       message:
-        createdPhotos.length === 1
+        createdPhotos.length ===
+        1
           ? "Photo enregistrée avec succès"
           : "Photos enregistrées avec succès",
 
@@ -511,76 +665,65 @@ const uploadParticipantPhotos = async (req, res) => {
 
         maximum:
           MAX_PHOTOS,
+
+        participantStatus:
+          participantResult.rows[0]
+            ?.status,
       },
     });
   } catch (error) {
     /*
-     * =========================================================
-     * ROLLBACK DB
-     * =========================================================
+     * =====================================================
+     * 13. ROLLBACK POSTGRESQL
+     * =====================================================
      */
-    try {
-      await client.query(
-        "ROLLBACK"
-      );
-
-      console.log(
-        "UPLOAD ROLLBACK SUCCESS"
-      );
-    } catch (
-      rollbackError
-    ) {
-      console.error(
-        "UPLOAD ROLLBACK ERROR :",
-        rollbackError
-      );
-    }
-
-    /*
-     * =========================================================
-     * NETTOYAGE DES FICHIERS
-     * =========================================================
-     *
-     * Si PostgreSQL échoue après
-     * l'écriture physique, on supprime
-     * les fichiers créés pendant
-     * cette requête.
-     */
-    for (
-      const filePath
-      of writtenFiles
-    ) {
+    if (transactionStarted) {
       try {
-        await fs.unlink(
-          filePath
+        await client.query(
+          "ROLLBACK"
         );
 
         console.log(
-          "ROLLBACK FILE DELETED :",
-          filePath
+          "DB ROLLBACK SUCCESS"
         );
       } catch (
-        fileError
+        rollbackError
       ) {
-        if (
-          fileError.code !==
-          "ENOENT"
-        ) {
-          console.error(
-            "ROLLBACK FILE DELETE ERROR :",
-            fileError
-          );
-        }
+        console.error(
+          "DB ROLLBACK ERROR :",
+          rollbackError
+        );
       }
     }
+
+    /*
+     * =====================================================
+     * 14. ROLLBACK SUPABASE STORAGE
+     * =====================================================
+     *
+     * Si par exemple :
+     *
+     * - 3 photos sont uploadées
+     * - la 4e échoue
+     *
+     * on supprime les 3 premières.
+     *
+     * La requête reste atomique
+     * fonctionnellement.
+     */
+    await cleanupSupabaseFiles(
+      uploadedStorageKeys
+    );
 
     console.error(
       "UPLOAD PARTICIPANT PHOTOS ERROR :",
       {
         message:
           error.message,
+
         code:
           error.code,
+
         stack:
           error.stack,
       }
@@ -588,6 +731,7 @@ const uploadParticipantPhotos = async (req, res) => {
 
     return res.status(500).json({
       success: false,
+
       message:
         error.message ||
         "Impossible d'enregistrer les photos",
@@ -600,6 +744,7 @@ const uploadParticipantPhotos = async (req, res) => {
     );
   }
 };
+
 
 module.exports = {
   uploadParticipantPhotos,

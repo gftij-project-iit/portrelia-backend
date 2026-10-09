@@ -5,6 +5,7 @@ const cors = require("cors")
 const cookieParser = require("cookie-parser");
 const { dbConnect } = require("./config/db");
 const router = require("./routes/routes");
+const { testSupabaseConnection } = require("./config/supabase");
 
 
 
@@ -29,7 +30,7 @@ app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
 
 dbConnect();
-
+testSupabaseConnection();
 
 
 // Public + auth

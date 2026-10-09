@@ -13,6 +13,7 @@ const { getAdminCompanyById } = require("../controllers/admin/adminCompanyById")
 const { updateAdminCompany } = require("../controllers/admin/updateAdminCompany");
 const { deleteAdminCompany } = require("../controllers/admin/deleteAdminCompany");
 const { deleteAdminDemoRequest } = require("../controllers/admin/deleteAdminDemoRequest");
+const { getAdminCampaigns, getAdminCampaignById, getAdminParticipantById } = require("../controllers/admin/adminCampaignController");
 
 
 const router = express.Router();
@@ -33,5 +34,10 @@ router.get("/companies/:id",getAdminCompanyById);
 router.patch("/companies/:id",updateAdminCompany);
 router.delete("/companies/:id",deleteAdminCompany);
 router.delete("/demo-requests/:id",deleteAdminDemoRequest);
+
+
+router.get("/campaigns", getAdminCampaigns);
+router.get("/campaigns/:campaignId", getAdminCampaignById);
+router.get("/participants/:participantId",getAdminParticipantById);
 
 module.exports = router;
