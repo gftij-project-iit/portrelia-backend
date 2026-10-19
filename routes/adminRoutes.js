@@ -14,6 +14,13 @@ const { updateAdminCompany } = require("../controllers/admin/updateAdminCompany"
 const { deleteAdminCompany } = require("../controllers/admin/deleteAdminCompany");
 const { deleteAdminDemoRequest } = require("../controllers/admin/deleteAdminDemoRequest");
 const { getAdminCampaigns, getAdminCampaignById, getAdminParticipantById } = require("../controllers/admin/adminCampaignController");
+const { reviewAdminPhoto } = require("../controllers/admin/adminPhotoReviewController");
+const { completeParticipantQa } = require("../controllers/admin/adminQaController");
+const { startParticipantGeneration } = require("../controllers/admin/adminGenerationController");
+const { getGeneratedPortraitsForParticipant } = require("../controllers/admin/adminGeneratedPortraitController");
+const { regenerateGeneratedPortrait } = require("../controllers/admin/adminPortraitRegenerationController");
+const { reviewGeneratedPortrait } = require("../controllers/admin/adminGeneratedPortraitReviewController");
+const { completePortraitQa } = require("../controllers/admin/adminPortraitQaCompleteController");
 
 
 const router = express.Router();
@@ -39,5 +46,12 @@ router.delete("/demo-requests/:id",deleteAdminDemoRequest);
 router.get("/campaigns", getAdminCampaigns);
 router.get("/campaigns/:campaignId", getAdminCampaignById);
 router.get("/participants/:participantId",getAdminParticipantById);
+router.patch( "/photos/:photoId/review",reviewAdminPhoto);
+router.post("/participants/:participantId/qa/complete",completeParticipantQa);
+router.post( "/participants/:participantId/generation/start",startParticipantGeneration);
+router.get("/participants/:participantId/generated-portraits",getGeneratedPortraitsForParticipant);
+router.post("/generated-portraits/:portraitId/regenerate",regenerateGeneratedPortrait);
+router.patch("/generated-portraits/:portraitId/review",reviewGeneratedPortrait);
+router.post("/participants/:participantId/portraits-qa/complete", completePortraitQa);
 
 module.exports = router;

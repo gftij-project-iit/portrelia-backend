@@ -9,6 +9,8 @@ const { submitParticipantPhotos } = require("../controllers/participant/submitPa
 
 const { participantInvitationMiddleware } = require("../middlewares/participantInvitationMiddleware");
 const { participantPhotoUpload } = require("../middlewares/participantPhotoUpload");
+const { getParticipantGallery } = require("../controllers/participant/getParticipantGallery");
+const { selectParticipantPortrait } = require("../controllers/participant/selectParticipantPortrait");
 
 const router = express.Router();
 
@@ -66,5 +68,12 @@ router.post(
   participantInvitationMiddleware,
   submitParticipantPhotos
 );
-
+router.get(
+  "/gallery/:token",
+  getParticipantGallery
+);
+router.post(
+  "/gallery/:token/select",
+  selectParticipantPortrait
+);
 module.exports = router;
