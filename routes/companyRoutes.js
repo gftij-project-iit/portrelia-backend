@@ -10,7 +10,7 @@ const { updateCampaign } = require("../controllers/company/updateCampaign");
 const { cancelCampaign } = require("../controllers/company/cancelCampaign");
 const { addCampaignParticipants } = require("../controllers/company/addCampaignParticipants");
 const { resendCampaignInvitation } = require("../controllers/company/resendCampaignInvitation");
-const { getPlans, chooseFreePlan, preparePremiumPlan } = require("../controllers/company/companySubscriptionController");
+const { getPlans, chooseFreePlan, preparePremiumPlan, openBillingPortal } = require("../controllers/company/companySubscriptionController");
 
 const router = express.Router();
 
@@ -44,7 +44,7 @@ router.post("/campaigns/:id/cancel", cancelCampaign);
 
 // Collaborateurs d'une campagne
 router.post("/campaigns/:id/participants", addCampaignParticipants);
-
+router.post("/subscription/portal", openBillingPortal);
 
 
 module.exports = router;

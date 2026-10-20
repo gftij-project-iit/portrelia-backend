@@ -24,6 +24,7 @@ const { completePortraitQa } = require("../controllers/admin/adminPortraitQaComp
 const { getAdminGalleries } = require("../controllers/admin/adminGalleriesController");
 
 
+
 const router = express.Router();
 
 // Toutes les routes ici = ADMIN uniquement
@@ -55,5 +56,6 @@ router.post("/generated-portraits/:portraitId/regenerate",regenerateGeneratedPor
 router.patch("/generated-portraits/:portraitId/review",reviewGeneratedPortrait);
 router.post("/participants/:participantId/portraits-qa/complete", completePortraitQa);
 router.get("/galleries",getAdminGalleries);
+
 
 module.exports = router;

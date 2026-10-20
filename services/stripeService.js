@@ -228,12 +228,55 @@ const createPremiumCheckoutSession = async ({
   };
 };
 
-/* =========================================================
-   EXPORTS
-========================================================= */
+
+
+const createBillingPortalSession = async ({
+  companyId,
+  stripeCustomerId,
+}) => {
+  if (!companyId || !stripeCustomerId) {
+    throw new Error("Abonnement Stripe introuvable.");
+  }
+
+  const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, "");
+
+  if (!frontendUrl) {
+    throw new Error("FRONTEND_URL manquante.");
+  }
+
+  const stripe = getStripe();
+
+  const customer = await stripe.customers.retrieve(stripeCustomerId);
+
+  if (customer.deleted) {
+    throw new Error("Client Stripe supprimé.");
+  }
+
+  if (customer.metadata?.companyId !== String(companyId)) {
+    throw new Error(
+      "Le client Stripe ne correspond pas à cette entreprise."
+    );
+  }
+
+  const session = await stripe.billingPortal.sessions.create({
+    customer: stripeCustomerId,
+    return_url: `${frontendUrl}/dashboard/abonnement`,
+  });
+
+  console.log(
+    "✅ Portail Stripe créé pour l'entreprise :",
+    companyId
+  );
+
+  return {
+    portalUrl: session.url,
+  };
+};
 
 module.exports = {
   getOrCreateStripeCustomer,
   getPremiumStripePrice,
   createPremiumCheckoutSession,
+  createBillingPortalSession,
 };
+
