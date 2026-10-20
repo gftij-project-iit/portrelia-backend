@@ -10,12 +10,30 @@ const { updateCampaign } = require("../controllers/company/updateCampaign");
 const { cancelCampaign } = require("../controllers/company/cancelCampaign");
 const { addCampaignParticipants } = require("../controllers/company/addCampaignParticipants");
 const { resendCampaignInvitation } = require("../controllers/company/resendCampaignInvitation");
+const { getPlans, chooseFreePlan, preparePremiumPlan } = require("../controllers/company/companySubscriptionController");
 
 const router = express.Router();
 
 // Toutes les routes ici = COMPANY_ADMIN uniquement
 router.use(authMiddleware);
 router.use(roleMiddleware("COMPANY_ADMIN"));
+
+// Invitations collaborateurs
+router.post( "/campaigns/:id/invitations/:invitationId/resend",
+  resendCampaignInvitation);
+
+router.get("/plans",getPlans);
+
+router.post(
+  "/subscription/free",
+  chooseFreePlan
+);
+
+router.post(
+  "/subscription/premium",
+  preparePremiumPlan
+);
+
 
 // Campagnes
 router.get("/campaigns", getCampaigns);
@@ -27,10 +45,6 @@ router.post("/campaigns/:id/cancel", cancelCampaign);
 // Collaborateurs d'une campagne
 router.post("/campaigns/:id/participants", addCampaignParticipants);
 
-// Invitations collaborateurs
-router.post(
-  "/campaigns/:id/invitations/:invitationId/resend",
-  resendCampaignInvitation
-);
+
 
 module.exports = router;

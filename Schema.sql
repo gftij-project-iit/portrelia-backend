@@ -109,6 +109,13 @@ CREATE TYPE deletion_status AS ENUM (
   'REJECTED'
 );
 
+CREATE TYPE subscription_status AS ENUM (
+  'ACTIVE',
+  'INCOMPLETE',
+  'PAST_DUE',
+  'CANCELED'
+);
+
 /* =========================================================
    USERS
 ========================================================= */
@@ -135,6 +142,49 @@ CREATE TABLE users (
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+/* =========================================================
+   REQUIRED ACTIONS
+========================================================= */
+
+CREATE TABLE required_actions (
+  id BIGSERIAL PRIMARY KEY,
+
+  code VARCHAR(100) NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+
+  title VARCHAR(255) NOT NULL,
+  description TEXT,
+
+  target_role user_role NOT NULL DEFAULT 'COMPANY_ADMIN',
+
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT required_actions_code_version_unique
+    UNIQUE (code, version),
+
+  CONSTRAINT required_actions_version_check
+    CHECK (version > 0)
+);
+
+CREATE TABLE user_required_action_acceptances (
+  id BIGSERIAL PRIMARY KEY,
+
+  user_id BIGINT NOT NULL
+    REFERENCES users(id)
+    ON DELETE CASCADE,
+
+  required_action_id BIGINT NOT NULL
+    REFERENCES required_actions(id)
+    ON DELETE CASCADE,
+
+  accepted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT user_required_action_acceptances_unique
+    UNIQUE (user_id, required_action_id)
 );
 
 /* =========================================================
@@ -223,6 +273,133 @@ CHECK (
     role = 'COMPANY_ADMIN'
     AND company_id IS NOT NULL
   )
+);
+
+/* =========================================================
+   PLANS
+========================================================= */
+
+CREATE TABLE plans (
+  id BIGSERIAL PRIMARY KEY,
+
+  code VARCHAR(50) NOT NULL UNIQUE,
+
+  name VARCHAR(100) NOT NULL,
+
+  description TEXT,
+
+  price_monthly NUMERIC(10,2)
+    NOT NULL
+    DEFAULT 0,
+
+  currency CHAR(3)
+    NOT NULL
+    DEFAULT 'EUR',
+
+  is_free BOOLEAN
+    NOT NULL
+    DEFAULT FALSE,
+
+  is_active BOOLEAN
+    NOT NULL
+    DEFAULT TRUE,
+
+  sort_order INTEGER
+    NOT NULL
+    DEFAULT 0,
+
+  max_active_campaigns INTEGER,
+
+  max_participants_per_campaign INTEGER,
+
+  max_portraits_per_month INTEGER,
+
+  all_styles BOOLEAN
+    NOT NULL
+    DEFAULT FALSE,
+
+  hd_download BOOLEAN
+    NOT NULL
+    DEFAULT FALSE,
+
+  zip_export BOOLEAN
+    NOT NULL
+    DEFAULT FALSE,
+
+  custom_branding BOOLEAN
+    NOT NULL
+    DEFAULT FALSE,
+
+  priority_support BOOLEAN
+    NOT NULL
+    DEFAULT FALSE,
+
+  created_at TIMESTAMPTZ
+    NOT NULL
+    DEFAULT NOW(),
+
+  updated_at TIMESTAMPTZ
+    NOT NULL
+    DEFAULT NOW(),
+
+  CONSTRAINT plans_price_check
+    CHECK (price_monthly >= 0),
+
+  CONSTRAINT plans_max_active_campaigns_check
+    CHECK (
+      max_active_campaigns IS NULL
+      OR max_active_campaigns > 0
+    ),
+
+  CONSTRAINT plans_max_participants_check
+    CHECK (
+      max_participants_per_campaign IS NULL
+      OR max_participants_per_campaign > 0
+    ),
+
+  CONSTRAINT plans_max_portraits_check
+    CHECK (
+      max_portraits_per_month IS NULL
+      OR max_portraits_per_month > 0
+    )
+);
+
+/* =========================================================
+   COMPANY SUBSCRIPTIONS
+========================================================= */
+
+CREATE TABLE company_subscriptions (
+  id BIGSERIAL PRIMARY KEY,
+
+  company_id BIGINT NOT NULL UNIQUE
+    REFERENCES companies(id)
+    ON DELETE CASCADE,
+
+  plan_id BIGINT NOT NULL
+    REFERENCES plans(id)
+    ON DELETE RESTRICT,
+
+  status subscription_status
+    NOT NULL
+    DEFAULT 'ACTIVE',
+
+  stripe_customer_id VARCHAR(255),
+
+  stripe_subscription_id VARCHAR(255),
+
+  current_period_start TIMESTAMPTZ,
+
+  current_period_end TIMESTAMPTZ,
+
+  canceled_at TIMESTAMPTZ,
+
+  created_at TIMESTAMPTZ
+    NOT NULL
+    DEFAULT NOW(),
+
+  updated_at TIMESTAMPTZ
+    NOT NULL
+    DEFAULT NOW()
 );
 
 /* =========================================================
@@ -345,28 +522,10 @@ CREATE TABLE participants (
 CREATE TABLE invitations (
   id BIGSERIAL PRIMARY KEY,
 
-  /*
-   * Un participant possède une seule
-   * invitation courante.
-   *
-   * Lors d'une relance, on met à jour
-   * cette ligne au lieu d'en créer une
-   * nouvelle.
-   */
   participant_id BIGINT NOT NULL UNIQUE
     REFERENCES participants(id)
     ON DELETE CASCADE,
 
-  /*
-   * Token sécurisé envoyé dans le lien
-   * d'invitation.
-   *
-   * PostgreSQL génère automatiquement
-   * le token à la création.
-   *
-   * Lors d'une relance, le token pourra
-   * être remplacé par un nouveau UUID.
-   */
   token UUID NOT NULL
     DEFAULT gen_random_uuid()
     UNIQUE,
@@ -375,24 +534,11 @@ CREATE TABLE invitations (
     NOT NULL
     DEFAULT 'PENDING',
 
-  /*
-   * Date d'expiration du lien.
-   *
-   * Elle correspond actuellement
-   * à la deadline de la campagne.
-   */
   expires_at TIMESTAMPTZ,
 
-  /*
-   * Suivi de l'envoi et de l'ouverture.
-   */
   sent_at TIMESTAMPTZ,
   opened_at TIMESTAMPTZ,
 
-  /*
-   * Nombre de relances effectuées
-   * pour cette même invitation.
-   */
   reminder_count INTEGER
     NOT NULL
     DEFAULT 0,
@@ -883,6 +1029,21 @@ ON users(company_id);
 CREATE INDEX idx_users_role
 ON users(role);
 
+CREATE INDEX idx_required_actions_active_role
+ON required_actions(target_role, is_active);
+
+CREATE INDEX idx_required_action_acceptances_action
+ON user_required_action_acceptances(required_action_id);
+
+CREATE INDEX idx_plans_active
+ON plans(is_active);
+
+CREATE INDEX idx_company_subscriptions_plan
+ON company_subscriptions(plan_id);
+
+CREATE INDEX idx_company_subscriptions_status
+ON company_subscriptions(status);
+
 CREATE INDEX idx_demo_requests_status
 ON demo_requests(status);
 
@@ -900,16 +1061,6 @@ ON participants(campaign_id);
 
 CREATE INDEX idx_participants_status
 ON participants(status);
-
-/*
- * Pas besoin d'index manuel sur :
- *
- * invitations.participant_id
- * invitations.token
- *
- * car les contraintes UNIQUE créent
- * déjà leurs propres index.
- */
 
 CREATE INDEX idx_input_photos_participant
 ON input_photos(participant_id);
@@ -968,6 +1119,16 @@ BEFORE UPDATE ON companies
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+CREATE TRIGGER plans_updated_at
+BEFORE UPDATE ON plans
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER company_subscriptions_updated_at
+BEFORE UPDATE ON company_subscriptions
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 CREATE TRIGGER portrait_styles_updated_at
 BEFORE UPDATE ON portrait_styles
 FOR EACH ROW
@@ -983,12 +1144,6 @@ BEFORE UPDATE ON participants
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
-/*
- * Important :
- * le token, le statut et les dates
- * d'une invitation peuvent changer
- * lors d'une relance.
- */
 CREATE TRIGGER invitations_updated_at
 BEFORE UPDATE ON invitations
 FOR EACH ROW
@@ -1018,6 +1173,63 @@ CREATE TRIGGER deliveries_updated_at
 BEFORE UPDATE ON deliveries
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
+
+/* =========================================================
+   INITIAL PLANS
+========================================================= */
+
+INSERT INTO plans (
+  code,
+  name,
+  description,
+  price_monthly,
+  currency,
+  is_free,
+  sort_order,
+  max_active_campaigns,
+  max_participants_per_campaign,
+  max_portraits_per_month,
+  all_styles,
+  hd_download,
+  zip_export,
+  custom_branding,
+  priority_support
+)
+VALUES
+(
+  'FREE',
+  'Free',
+  'Pour découvrir Portrélia et démarrer gratuitement.',
+  0,
+  'EUR',
+  TRUE,
+  1,
+  1,
+  5,
+  20,
+  FALSE,
+  FALSE,
+  FALSE,
+  FALSE,
+  FALSE
+),
+(
+  'PREMIUM',
+  'Premium',
+  'Pour accéder aux fonctionnalités avancées de Portrélia.',
+  29.90,
+  'EUR',
+  FALSE,
+  2,
+  50,
+  250,
+  1000,
+  TRUE,
+  TRUE,
+  TRUE,
+  TRUE,
+  TRUE
+);
 
 /* =========================================================
    INITIAL PORTRAIT STYLES

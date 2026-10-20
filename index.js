@@ -1,18 +1,18 @@
 
-
-const express = require("express")
-const cors = require("cors")
-const cookieParser = require("cookie-parser");
-const { dbConnect } = require("./config/db");
-const router = require("./routes/routes");
-const { testSupabaseConnection } = require("./config/supabase");
-
-
-
-
 require("dotenv").config();
 
-const app = express()
+const express = require("express");
+const cors = require("cors");
+const cookieParser = require("cookie-parser");
+
+const { dbConnect } = require("./config/db");
+const { testSupabaseConnection } = require("./config/supabase");
+const { testStripeConnection } = require("./config/stripe");
+const { stripeWebhook } = require("./controllers/company/stripeWebhookController");
+
+const router = require("./routes/routes");
+
+const app = express();
 
 app.use(
   cors({
@@ -23,39 +23,45 @@ app.use(
   })
 );
 
+// Webhook Stripe avant express.json()
+app.post(
+  "/api/v1/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  stripeWebhook
+);
 
-app.use(express.json())
-app.use(express.urlencoded({ extended: true }))
-
-app.use(cookieParser())
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
 dbConnect();
 testSupabaseConnection();
+testStripeConnection();
 
-
-// Public + auth
+// Routes publiques et authentification
 app.use("/api/v1", router);
 
-// Admin
+// Routes administrateur
 app.use("/api/v1/admin", require("./routes/adminRoutes"));
 
-// Entreprise
+// Routes entreprise
 app.use("/api/v1/company", require("./routes/companyRoutes"));
 
-// Participant
-app.use("/api/v1/participant",require("./routes/participantRoutes"));
+// Routes participant
+app.use("/api/v1/participant", require("./routes/participantRoutes"));
+
 const start = async () => {
   try {
-    
-    app.listen(process.env.PORT, () => {
-  console.log(`Auth service running on http://localhost:${process.env.PORT}   ` )
-})
+    const port = process.env.PORT ;
 
-  } catch (err) {
-    console.error("❌ Auth service failed:", err);
+    app.listen(port, () => {
+      console.log(`Auth service running on http://localhost:${port}`);
+      console.log("Stripe webhook : /api/v1/stripe/webhook");
+    });
+  } catch (error) {
+    console.error("❌ Auth service failed:", error);
     process.exit(1);
   }
 };
 
 start();
-

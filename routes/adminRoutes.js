@@ -21,6 +21,7 @@ const { getGeneratedPortraitsForParticipant } = require("../controllers/admin/ad
 const { regenerateGeneratedPortrait } = require("../controllers/admin/adminPortraitRegenerationController");
 const { reviewGeneratedPortrait } = require("../controllers/admin/adminGeneratedPortraitReviewController");
 const { completePortraitQa } = require("../controllers/admin/adminPortraitQaCompleteController");
+const { getAdminGalleries } = require("../controllers/admin/adminGalleriesController");
 
 
 const router = express.Router();
@@ -53,5 +54,6 @@ router.get("/participants/:participantId/generated-portraits",getGeneratedPortra
 router.post("/generated-portraits/:portraitId/regenerate",regenerateGeneratedPortrait);
 router.patch("/generated-portraits/:portraitId/review",reviewGeneratedPortrait);
 router.post("/participants/:participantId/portraits-qa/complete", completePortraitQa);
+router.get("/galleries",getAdminGalleries);
 
 module.exports = router;
