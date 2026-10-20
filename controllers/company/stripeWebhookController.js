@@ -381,9 +381,11 @@ const stripeWebhook = async (req, res) => {
   try {
     // Éviter de mélanger les événements
     // des comptes LIVE et TEST.
-    const configuredLiveMode =
-      process.env.STRIPE_SECRET_KEY
-        ?.startsWith("sk_live_");
+    const secretKey = process.env.STRIPE_SECRET_KEY?.trim();
+
+const configuredLiveMode =
+  secretKey?.startsWith("sk_live_") ||
+  secretKey?.startsWith("rk_live_");
 
     if (event.livemode !== configuredLiveMode) {
       throw new Error(
