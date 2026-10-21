@@ -7,6 +7,7 @@ const { db } = require("../config/db");
 const {
   sendMail,
 } = require("../services/mailService");
+const { resetPasswordSchema } = require("../dto/resetPassword.dto");
 
 const RESET_EXPIRATION_MINUTES = 30;
 
@@ -363,28 +364,22 @@ const forgotPassword = async (req, res) => {
  */
 
 const resetPassword = async (req, res) => {
-  const token = req.body?.token;
+  const { error, value } = resetPasswordSchema.validate(
+    req.body,
+    {
+      abortEarly: false,
+      stripUnknown: true,
+    }
+  );
 
-  const newPassword = req.body?.newPassword;
-
-  if (
-    typeof token !== "string" ||
-    !/^[a-f0-9]{64}$/.test(token)
-  ) {
+  if (error) {
     return res.status(400).json({
       success: false,
-      message:
-        "Lien de réinitialisation invalide.",
+      message: error.details[0].message,
     });
   }
 
-  if (!validPassword(newPassword)) {
-    return res.status(400).json({
-      success: false,
-      message:
-        "Le mot de passe doit contenir au moins 8 caractères et respecter la limite de 72 octets.",
-    });
-  }
+  const { token, newPassword } = value;
 
   const client = await db.connect();
 
