@@ -1,3 +1,4 @@
+
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 
@@ -59,6 +60,7 @@ const getSubscriptionForUser = async (companyId, role) => {
       cs.current_period_start AS "currentPeriodStart",
       cs.current_period_end AS "currentPeriodEnd",
       cs.canceled_at AS "canceledAt",
+      cs.cancel_at_period_end AS "cancelAtPeriodEnd",
       cs.created_at AS "createdAt",
       cs.updated_at AS "updatedAt",
 
@@ -91,6 +93,7 @@ const getSubscriptionForUser = async (companyId, role) => {
     currentPeriodStart: subscription.currentPeriodStart,
     currentPeriodEnd: subscription.currentPeriodEnd,
     canceledAt: subscription.canceledAt,
+    cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
     createdAt: subscription.createdAt,
     updatedAt: subscription.updatedAt,
     plan: {

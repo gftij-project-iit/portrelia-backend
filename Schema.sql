@@ -392,6 +392,7 @@ CREATE TABLE company_subscriptions (
   current_period_end TIMESTAMPTZ,
 
   canceled_at TIMESTAMPTZ,
+  cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE,
 
   created_at TIMESTAMPTZ
     NOT NULL
