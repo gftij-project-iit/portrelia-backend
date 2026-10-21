@@ -25,22 +25,58 @@ const SHARE_DURATION_DAYS = 7;
    SIGNED URLS SUPABASE
 ========================================================= */
 
+/*
+ * =========================================================
+ * SIGNED URL — PORTRAITS FINAUX
+ * =========================================================
+ *
+ * Même méthode que getAdminGalleries.
+ * Le bucket Supabase reste privé.
+ * La clé service role ne va jamais au frontend.
+ */
+
 const createSignedImageUrl = async (storageKey) => {
-  if (!storageKey || !GENERATED_BUCKET) return null;
+  if (!storageKey) {
+    console.error(
+      "[COMPANY GALLERY] STORAGE KEY MANQUANTE"
+    );
+
+    return null;
+  }
+
+  if (!GENERATED_BUCKET) {
+    console.error(
+      "[COMPANY GALLERY] BUCKET NON CONFIGURÉ"
+    );
+
+    return null;
+  }
 
   try {
-    const { data, error } = await supabase.storage
+    const { data, error } = await supabase
+      .storage
       .from(GENERATED_BUCKET)
-      .createSignedUrl(storageKey, SIGNED_URL_DURATION);
+      .createSignedUrl(
+        storageKey,
+        SIGNED_URL_DURATION
+      );
 
     if (error) {
-      console.error("Erreur signed URL galerie :", error);
+      console.error(
+        "[COMPANY GALLERY] SIGNED URL ERROR:",
+        error
+      );
+
       return null;
     }
 
     return data?.signedUrl || null;
   } catch (error) {
-    console.error("Erreur Supabase galerie :", error);
+    console.error(
+      "[COMPANY GALLERY] SIGNED URL EXCEPTION:",
+      error
+    );
+
     return null;
   }
 };
