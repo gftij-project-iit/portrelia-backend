@@ -1,5 +1,6 @@
 
 const { db } = require("../../config/db");
+const { getStripe } = require("../../config/stripe");
 
 const {
   createPremiumCheckoutSession,
@@ -584,9 +585,154 @@ const openBillingPortal = async (req, res) => {
   }
 };
 
+
+const getBillingInvoices = async (req, res) => {
+  try {
+    if (req.user.role !== "COMPANY_ADMIN") {
+      return res.status(403).json({
+        success: false,
+        message: "Accès non autorisé",
+      });
+    }
+
+    const companyId = req.user.companyId;
+
+    if (!companyId) {
+      return res.status(403).json({
+        success: false,
+        message: "Entreprise introuvable",
+      });
+    }
+
+    // Récupérer le client Stripe associé à l'entreprise connectée.
+    const result = await db.query(
+      `
+      SELECT
+        cs.stripe_customer_id AS "stripeCustomerId",
+        co.status AS "companyStatus"
+      FROM companies co
+      LEFT JOIN company_subscriptions cs
+        ON cs.company_id = co.id
+      WHERE co.id = $1
+      LIMIT 1
+      `,
+      [companyId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Entreprise introuvable",
+      });
+    }
+
+    const company = result.rows[0];
+
+    if (company.companyStatus !== "ACTIVE") {
+      return res.status(403).json({
+        success: false,
+        message: "Entreprise inactive",
+      });
+    }
+
+    // Une entreprise sans client Stripe n'a pas de factures.
+    if (!company.stripeCustomerId) {
+      return res.status(200).json({
+        success: true,
+        invoices: [],
+        hasMore: false,
+        nextCursor: null,
+      });
+    }
+
+    // Pagination Stripe : 20 factures par requête.
+    const cursor = req.query.cursor;
+
+    if (
+      cursor !== undefined &&
+      (
+        typeof cursor !== "string" ||
+        !/^in_[a-zA-Z0-9]+$/.test(cursor)
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Curseur de pagination invalide",
+      });
+    }
+
+    const stripe = getStripe();
+
+    const params = {
+      customer: company.stripeCustomerId,
+      limit: 20,
+    };
+
+    if (cursor) {
+      params.starting_after = cursor;
+    }
+
+    // Stripe fournit l'historique réel des factures.
+    const resultStripe = await stripe.invoices.list(params);
+
+    const invoices = resultStripe.data.map((invoice) => ({
+      id: invoice.id,
+      number: invoice.number,
+      status: invoice.status,
+      currency: invoice.currency,
+      subtotal: invoice.subtotal,
+      total: invoice.total,
+      amountPaid: invoice.amount_paid,
+      amountRemaining: invoice.amount_remaining,
+      createdAt: invoice.created
+        ? new Date(invoice.created * 1000).toISOString()
+        : null,
+      dueDate: invoice.due_date
+        ? new Date(invoice.due_date * 1000).toISOString()
+        : null,
+      paidAt: invoice.status_transitions?.paid_at
+        ? new Date(
+            invoice.status_transitions.paid_at * 1000
+          ).toISOString()
+        : null,
+      description: invoice.description,
+      invoicePdf: invoice.invoice_pdf || null,
+      hostedInvoiceUrl: invoice.hosted_invoice_url || null,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      invoices,
+      hasMore: resultStripe.has_more,
+      nextCursor: resultStripe.has_more
+        ? resultStripe.data.at(-1)?.id || null
+        : null,
+    });
+  } catch (error) {
+    console.error("Erreur getBillingInvoices :", error);
+
+    if (
+      error.type?.startsWith("Stripe") ||
+      error.name?.startsWith("Stripe")
+    ) {
+      return res.status(502).json({
+        success: false,
+        message: "Impossible de récupérer les factures Stripe.",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Impossible de récupérer l'historique de facturation.",
+    });
+  }
+};
+
+
 module.exports = {
   getPlans,
   chooseFreePlan,
   preparePremiumPlan,
+  getBillingInvoices,
   openBillingPortal,
 };

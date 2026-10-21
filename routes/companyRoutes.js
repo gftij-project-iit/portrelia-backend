@@ -10,7 +10,8 @@ const { updateCampaign } = require("../controllers/company/updateCampaign");
 const { cancelCampaign } = require("../controllers/company/cancelCampaign");
 const { addCampaignParticipants } = require("../controllers/company/addCampaignParticipants");
 const { resendCampaignInvitation } = require("../controllers/company/resendCampaignInvitation");
-const { getPlans, chooseFreePlan, preparePremiumPlan, openBillingPortal } = require("../controllers/company/companySubscriptionController");
+const { getPlans, chooseFreePlan, preparePremiumPlan, openBillingPortal, getBillingInvoices } = require("../controllers/company/companySubscriptionController");
+const { getCompanyGalleryPortraits, getCompanyGalleryShare, createCompanyGalleryShare, revokeCompanyGalleryShare } = require("../controllers/company/getCompanyGalleryPortraits");
 
 const router = express.Router();
 
@@ -45,6 +46,19 @@ router.post("/campaigns/:id/cancel", cancelCampaign);
 // Collaborateurs d'une campagne
 router.post("/campaigns/:id/participants", addCampaignParticipants);
 router.post("/subscription/portal", openBillingPortal);
+
+//factures
+router.get("/billing/invoices", getBillingInvoices);
+
+
+router.get("/gallery/portraits", getCompanyGalleryPortraits);
+
+router.get("/gallery/share", getCompanyGalleryShare);
+
+router.post("/gallery/share", createCompanyGalleryShare);
+
+router.delete("/gallery/share", revokeCompanyGalleryShare);
+
 
 
 module.exports = router;

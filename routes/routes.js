@@ -10,6 +10,7 @@ const {
 
 const { authMiddleware } = require("../middlewares/authMiddleware");
 const { activateAccount } = require("../controllers/activateAccountController");
+const { getPublicCompanyGallery } = require("../controllers/company/getCompanyGalleryPortraits");
 
 const router = express.Router();
 
@@ -17,6 +18,10 @@ const router = express.Router();
 router.post("/demo-requests", createDemoRequest);
 router.post("/activate-account", activateAccount);
 router.post("/login", login);
+
+// Galerie publique accessible avec un lien de partage
+router.get("/public/gallery/:token", getPublicCompanyGallery);
+
 
 // Authentification
 router.get("/me", authMiddleware, me);

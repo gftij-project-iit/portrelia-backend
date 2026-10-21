@@ -1020,6 +1020,22 @@ CREATE TABLE audit_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+
+
+CREATE TABLE IF NOT EXISTS company_gallery_shares (
+  id BIGSERIAL PRIMARY KEY,
+  company_id BIGINT NOT NULL
+    REFERENCES companies(id) ON DELETE CASCADE,
+  token_hash VARCHAR(64) NOT NULL UNIQUE,
+  created_by_user_id BIGINT NOT NULL
+    REFERENCES users(id),
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+
 /* =========================================================
    INDEXES
 ========================================================= */
@@ -1092,6 +1108,11 @@ ON deliveries(campaign_id);
 
 CREATE INDEX idx_deletion_status
 ON deletion_requests(status);
+CREATE INDEX IF NOT EXISTS idx_company_gallery_shares_company
+ON company_gallery_shares(company_id);
+
+CREATE INDEX IF NOT EXISTS idx_company_gallery_shares_token
+ON company_gallery_shares(token_hash);
 
 /* =========================================================
    UPDATED_AT
