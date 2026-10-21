@@ -37,46 +37,37 @@ const SHARE_DURATION_DAYS = 7;
 
 const createSignedImageUrl = async (storageKey) => {
   if (!storageKey) {
-    console.error(
-      "[COMPANY GALLERY] STORAGE KEY MANQUANTE"
-    );
-
+    console.error("[COMPANY GALLERY] Storage key manquante");
     return null;
   }
 
-  if (!GENERATED_BUCKET) {
-    console.error(
-      "[COMPANY GALLERY] BUCKET NON CONFIGURÉ"
-    );
+  const bucket = process.env.SUPABASE_GENERATED_BUCKET;
 
+  if (!bucket) {
+    console.error("[COMPANY GALLERY] Bucket non configuré");
     return null;
   }
 
   try {
     const { data, error } = await supabase
       .storage
-      .from(GENERATED_BUCKET)
-      .createSignedUrl(
-        storageKey,
-        SIGNED_URL_DURATION
-      );
+      .from(bucket)
+      .createSignedUrl(storageKey, 60 * 60);
 
     if (error) {
       console.error(
-        "[COMPANY GALLERY] SIGNED URL ERROR:",
-        error
+        "[COMPANY GALLERY] Erreur Supabase :",
+        error.message
       );
-
       return null;
     }
 
     return data?.signedUrl || null;
   } catch (error) {
     console.error(
-      "[COMPANY GALLERY] SIGNED URL EXCEPTION:",
+      "[COMPANY GALLERY] Exception Supabase :",
       error
     );
-
     return null;
   }
 };
@@ -224,6 +215,9 @@ const fetchFinalPortraits = async (companyId, offset) => {
 ========================================================= */
 
 const getCompanyGalleryPortraits = async (req, res) => {
+    res.set("Cache-Control", "no-store, private");
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
   try {
     const companyId = req.user.companyId;
 
@@ -509,6 +503,9 @@ const revokeCompanyGalleryShare = async (req, res) => {
 ========================================================= */
 
 const getPublicCompanyGallery = async (req, res) => {
+    res.set("Cache-Control", "no-store");
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
   try {
     const token = req.params.token;
 
