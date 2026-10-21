@@ -1,10 +1,11 @@
+
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-/* =========================================================
-   TYPES
-========================================================= */
+-- =========================================================
+-- TYPES
+-- =========================================================
 
 CREATE TYPE user_role AS ENUM (
   'ADMIN',
@@ -116,9 +117,9 @@ CREATE TYPE subscription_status AS ENUM (
   'CANCELED'
 );
 
-/* =========================================================
-   USERS
-========================================================= */
+-- =========================================================
+-- USERS
+-- =========================================================
 
 CREATE TABLE users (
   id BIGSERIAL PRIMARY KEY,
@@ -144,9 +145,9 @@ CREATE TABLE users (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-/* =========================================================
-   REQUIRED ACTIONS
-========================================================= */
+-- =========================================================
+-- REQUIRED ACTIONS
+-- =========================================================
 
 CREATE TABLE required_actions (
   id BIGSERIAL PRIMARY KEY,
@@ -157,7 +158,8 @@ CREATE TABLE required_actions (
   title VARCHAR(255) NOT NULL,
   description TEXT,
 
-  target_role user_role NOT NULL DEFAULT 'COMPANY_ADMIN',
+  target_role user_role
+    NOT NULL DEFAULT 'COMPANY_ADMIN',
 
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
 
@@ -187,9 +189,9 @@ CREATE TABLE user_required_action_acceptances (
     UNIQUE (user_id, required_action_id)
 );
 
-/* =========================================================
-   DEMO REQUESTS
-========================================================= */
+-- =========================================================
+-- DEMO REQUESTS
+-- =========================================================
 
 CREATE TABLE demo_requests (
   id BIGSERIAL PRIMARY KEY,
@@ -208,7 +210,8 @@ CREATE TABLE demo_requests (
 
   consent_to_contact BOOLEAN NOT NULL DEFAULT FALSE,
 
-  status demo_request_status NOT NULL DEFAULT 'PENDING',
+  status demo_request_status
+    NOT NULL DEFAULT 'PENDING',
 
   handled_by_user_id BIGINT
     REFERENCES users(id)
@@ -222,9 +225,9 @@ CREATE TABLE demo_requests (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-/* =========================================================
-   COMPANIES
-========================================================= */
+-- =========================================================
+-- COMPANIES
+-- =========================================================
 
 CREATE TABLE companies (
   id BIGSERIAL PRIMARY KEY,
@@ -239,7 +242,8 @@ CREATE TABLE companies (
 
   website_url TEXT,
 
-  status company_status NOT NULL DEFAULT 'ACTIVE',
+  status company_status
+    NOT NULL DEFAULT 'ACTIVE',
 
   source_demo_request_id BIGINT UNIQUE
     REFERENCES demo_requests(id)
@@ -275,9 +279,9 @@ CHECK (
   )
 );
 
-/* =========================================================
-   PLANS
-========================================================= */
+-- =========================================================
+-- PLANS
+-- =========================================================
 
 CREATE TABLE plans (
   id BIGSERIAL PRIMARY KEY,
@@ -289,24 +293,19 @@ CREATE TABLE plans (
   description TEXT,
 
   price_monthly NUMERIC(10,2)
-    NOT NULL
-    DEFAULT 0,
+    NOT NULL DEFAULT 0,
 
   currency CHAR(3)
-    NOT NULL
-    DEFAULT 'EUR',
+    NOT NULL DEFAULT 'EUR',
 
   is_free BOOLEAN
-    NOT NULL
-    DEFAULT FALSE,
+    NOT NULL DEFAULT FALSE,
 
   is_active BOOLEAN
-    NOT NULL
-    DEFAULT TRUE,
+    NOT NULL DEFAULT TRUE,
 
   sort_order INTEGER
-    NOT NULL
-    DEFAULT 0,
+    NOT NULL DEFAULT 0,
 
   max_active_campaigns INTEGER,
 
@@ -315,32 +314,25 @@ CREATE TABLE plans (
   max_portraits_per_month INTEGER,
 
   all_styles BOOLEAN
-    NOT NULL
-    DEFAULT FALSE,
+    NOT NULL DEFAULT FALSE,
 
   hd_download BOOLEAN
-    NOT NULL
-    DEFAULT FALSE,
+    NOT NULL DEFAULT FALSE,
 
   zip_export BOOLEAN
-    NOT NULL
-    DEFAULT FALSE,
+    NOT NULL DEFAULT FALSE,
 
   custom_branding BOOLEAN
-    NOT NULL
-    DEFAULT FALSE,
+    NOT NULL DEFAULT FALSE,
 
   priority_support BOOLEAN
-    NOT NULL
-    DEFAULT FALSE,
+    NOT NULL DEFAULT FALSE,
 
   created_at TIMESTAMPTZ
-    NOT NULL
-    DEFAULT NOW(),
+    NOT NULL DEFAULT NOW(),
 
   updated_at TIMESTAMPTZ
-    NOT NULL
-    DEFAULT NOW(),
+    NOT NULL DEFAULT NOW(),
 
   CONSTRAINT plans_price_check
     CHECK (price_monthly >= 0),
@@ -364,9 +356,9 @@ CREATE TABLE plans (
     )
 );
 
-/* =========================================================
-   COMPANY SUBSCRIPTIONS
-========================================================= */
+-- =========================================================
+-- COMPANY SUBSCRIPTIONS
+-- =========================================================
 
 CREATE TABLE company_subscriptions (
   id BIGSERIAL PRIMARY KEY,
@@ -380,32 +372,30 @@ CREATE TABLE company_subscriptions (
     ON DELETE RESTRICT,
 
   status subscription_status
-    NOT NULL
-    DEFAULT 'ACTIVE',
+    NOT NULL DEFAULT 'ACTIVE',
 
   stripe_customer_id VARCHAR(255),
 
   stripe_subscription_id VARCHAR(255),
 
   current_period_start TIMESTAMPTZ,
-
   current_period_end TIMESTAMPTZ,
 
   canceled_at TIMESTAMPTZ,
-  cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE,
+
+  cancel_at_period_end BOOLEAN
+    NOT NULL DEFAULT FALSE,
 
   created_at TIMESTAMPTZ
-    NOT NULL
-    DEFAULT NOW(),
+    NOT NULL DEFAULT NOW(),
 
   updated_at TIMESTAMPTZ
-    NOT NULL
-    DEFAULT NOW()
+    NOT NULL DEFAULT NOW()
 );
 
-/* =========================================================
-   PORTRAIT STYLES
-========================================================= */
+-- =========================================================
+-- PORTRAIT STYLES
+-- =========================================================
 
 CREATE TABLE portrait_styles (
   id BIGSERIAL PRIMARY KEY,
@@ -414,9 +404,7 @@ CREATE TABLE portrait_styles (
   slug VARCHAR(120) NOT NULL UNIQUE,
 
   description TEXT,
-
   prompt_template TEXT,
-
   preview_image_url TEXT,
 
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -427,9 +415,9 @@ CREATE TABLE portrait_styles (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-/* =========================================================
-   CAMPAIGNS
-========================================================= */
+-- =========================================================
+-- CAMPAIGNS
+-- =========================================================
 
 CREATE TABLE campaigns (
   id BIGSERIAL PRIMARY KEY,
@@ -450,7 +438,8 @@ CREATE TABLE campaigns (
 
   description TEXT,
 
-  status campaign_status NOT NULL DEFAULT 'DRAFT',
+  status campaign_status
+    NOT NULL DEFAULT 'DRAFT',
 
   deadline_at TIMESTAMPTZ,
 
@@ -478,9 +467,9 @@ CREATE TABLE campaigns (
     )
 );
 
-/* =========================================================
-   PARTICIPANTS
-========================================================= */
+-- =========================================================
+-- PARTICIPANTS
+-- =========================================================
 
 CREATE TABLE participants (
   id BIGSERIAL PRIMARY KEY,
@@ -497,8 +486,7 @@ CREATE TABLE participants (
   job_title VARCHAR(150),
 
   status participant_status
-    NOT NULL
-    DEFAULT 'INVITED',
+    NOT NULL DEFAULT 'INVITED',
 
   invited_at TIMESTAMPTZ,
   photos_received_at TIMESTAMPTZ,
@@ -510,15 +498,12 @@ CREATE TABLE participants (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
   CONSTRAINT participants_campaign_email_unique
-    UNIQUE (
-      campaign_id,
-      email
-    )
+    UNIQUE (campaign_id, email)
 );
 
-/* =========================================================
-   INVITATIONS
-========================================================= */
+-- =========================================================
+-- INVITATIONS
+-- =========================================================
 
 CREATE TABLE invitations (
   id BIGSERIAL PRIMARY KEY,
@@ -532,8 +517,7 @@ CREATE TABLE invitations (
     UNIQUE,
 
   status invitation_status
-    NOT NULL
-    DEFAULT 'PENDING',
+    NOT NULL DEFAULT 'PENDING',
 
   expires_at TIMESTAMPTZ,
 
@@ -541,28 +525,23 @@ CREATE TABLE invitations (
   opened_at TIMESTAMPTZ,
 
   reminder_count INTEGER
-    NOT NULL
-    DEFAULT 0,
+    NOT NULL DEFAULT 0,
 
   last_reminder_at TIMESTAMPTZ,
 
   created_at TIMESTAMPTZ
-    NOT NULL
-    DEFAULT NOW(),
+    NOT NULL DEFAULT NOW(),
 
   updated_at TIMESTAMPTZ
-    NOT NULL
-    DEFAULT NOW(),
+    NOT NULL DEFAULT NOW(),
 
   CONSTRAINT invitations_reminder_count_check
-    CHECK (
-      reminder_count >= 0
-    )
+    CHECK (reminder_count >= 0)
 );
 
-/* =========================================================
-   CONSENTS
-========================================================= */
+-- =========================================================
+-- CONSENTS
+-- =========================================================
 
 CREATE TABLE participant_consents (
   id BIGSERIAL PRIMARY KEY,
@@ -578,15 +557,14 @@ CREATE TABLE participant_consents (
   accepted_at TIMESTAMPTZ,
 
   ip_address INET,
-
   user_agent TEXT,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-/* =========================================================
-   INPUT PHOTOS
-========================================================= */
+-- =========================================================
+-- INPUT PHOTOS
+-- =========================================================
 
 CREATE TABLE input_photos (
   id BIGSERIAL PRIMARY KEY,
@@ -609,8 +587,7 @@ CREATE TABLE input_photos (
   height INTEGER,
 
   status photo_status
-    NOT NULL
-    DEFAULT 'UPLOADED',
+    NOT NULL DEFAULT 'UPLOADED',
 
   rejection_reason TEXT,
 
@@ -636,9 +613,9 @@ CREATE TABLE input_photos (
     )
 );
 
-/* =========================================================
-   GENERATION JOBS
-========================================================= */
+-- =========================================================
+-- GENERATION JOBS
+-- =========================================================
 
 CREATE TABLE generation_jobs (
   id BIGSERIAL PRIMARY KEY,
@@ -660,38 +637,30 @@ CREATE TABLE generation_jobs (
   provider_job_id VARCHAR(255),
 
   status generation_status
-    NOT NULL
-    DEFAULT 'QUEUED',
+    NOT NULL DEFAULT 'QUEUED',
 
   attempt_number INTEGER
-    NOT NULL
-    DEFAULT 1,
+    NOT NULL DEFAULT 1,
 
   cost_amount NUMERIC(12,4),
 
   cost_currency CHAR(3)
-    NOT NULL
-    DEFAULT 'EUR',
+    NOT NULL DEFAULT 'EUR',
 
   started_at TIMESTAMPTZ,
-
   completed_at TIMESTAMPTZ,
 
   error_code VARCHAR(100),
-
   error_message TEXT,
 
   request_payload JSONB,
-
   response_payload JSONB,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
   CONSTRAINT generation_attempt_check
-    CHECK (
-      attempt_number > 0
-    ),
+    CHECK (attempt_number > 0),
 
   CONSTRAINT generation_cost_check
     CHECK (
@@ -700,9 +669,9 @@ CREATE TABLE generation_jobs (
     )
 );
 
-/* =========================================================
-   GENERATED PORTRAITS
-========================================================= */
+-- =========================================================
+-- GENERATED PORTRAITS
+-- =========================================================
 
 CREATE TABLE generated_portraits (
   id BIGSERIAL PRIMARY KEY,
@@ -720,24 +689,21 @@ CREATE TABLE generated_portraits (
   storage_key TEXT NOT NULL,
 
   status portrait_status
-    NOT NULL
-    DEFAULT 'GENERATED',
+    NOT NULL DEFAULT 'GENERATED',
 
   is_gallery_visible BOOLEAN
-    NOT NULL
-    DEFAULT FALSE,
+    NOT NULL DEFAULT FALSE,
 
   is_selected_by_participant BOOLEAN
-    NOT NULL
-    DEFAULT FALSE,
+    NOT NULL DEFAULT FALSE,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-/* =========================================================
-   QA REVIEWS
-========================================================= */
+-- =========================================================
+-- QA REVIEWS
+-- =========================================================
 
 CREATE TABLE qa_reviews (
   id BIGSERIAL PRIMARY KEY,
@@ -753,13 +719,9 @@ CREATE TABLE qa_reviews (
   decision qa_decision NOT NULL,
 
   resemblance_ok BOOLEAN,
-
   artifacts_ok BOOLEAN,
-
   skin_tone_ok BOOLEAN,
-
   style_consistency_ok BOOLEAN,
-
   overall_quality_ok BOOLEAN,
 
   notes TEXT,
@@ -775,9 +737,9 @@ CREATE TABLE qa_reviews (
     )
 );
 
-/* =========================================================
-   RETOUCH TASKS
-========================================================= */
+-- =========================================================
+-- RETOUCH TASKS
+-- =========================================================
 
 CREATE TABLE retouch_tasks (
   id BIGSERIAL PRIMARY KEY,
@@ -791,24 +753,22 @@ CREATE TABLE retouch_tasks (
     ON DELETE SET NULL,
 
   status retouch_status
-    NOT NULL
-    DEFAULT 'TODO',
+    NOT NULL DEFAULT 'TODO',
 
   instructions TEXT,
 
   result_storage_key TEXT,
 
   started_at TIMESTAMPTZ,
-
   completed_at TIMESTAMPTZ,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-/* =========================================================
-   GALLERIES
-========================================================= */
+-- =========================================================
+-- GALLERIES
+-- =========================================================
 
 CREATE TABLE galleries (
   id BIGSERIAL PRIMARY KEY,
@@ -839,15 +799,12 @@ CREATE TABLE gallery_portraits (
 
   sort_order INTEGER NOT NULL DEFAULT 0,
 
-  PRIMARY KEY (
-    gallery_id,
-    portrait_id
-  )
+  PRIMARY KEY (gallery_id, portrait_id)
 );
 
-/* =========================================================
-   PARTICIPANT SELECTION
-========================================================= */
+-- =========================================================
+-- PARTICIPANT SELECTIONS
+-- =========================================================
 
 CREATE TABLE participant_selections (
   id BIGSERIAL PRIMARY KEY,
@@ -861,31 +818,25 @@ CREATE TABLE participant_selections (
     ON DELETE SET NULL,
 
   is_favorite BOOLEAN
-    NOT NULL
-    DEFAULT FALSE,
+    NOT NULL DEFAULT FALSE,
 
   is_final_selection BOOLEAN
-    NOT NULL
-    DEFAULT FALSE,
+    NOT NULL DEFAULT FALSE,
 
   revision_requested BOOLEAN
-    NOT NULL
-    DEFAULT FALSE,
+    NOT NULL DEFAULT FALSE,
 
   revision_reason TEXT,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-  UNIQUE (
-    participant_id,
-    portrait_id
-  )
+  UNIQUE (participant_id, portrait_id)
 );
 
-/* =========================================================
-   DELIVERIES
-========================================================= */
+-- =========================================================
+-- DELIVERIES
+-- =========================================================
 
 CREATE TABLE deliveries (
   id BIGSERIAL PRIMARY KEY,
@@ -899,33 +850,27 @@ CREATE TABLE deliveries (
     ON DELETE SET NULL,
 
   status delivery_status
-    NOT NULL
-    DEFAULT 'PREPARING',
+    NOT NULL DEFAULT 'PREPARING',
 
   zip_storage_key TEXT,
-
   manifest_storage_key TEXT,
 
   portrait_count INTEGER
-    NOT NULL
-    DEFAULT 0,
+    NOT NULL DEFAULT 0,
 
   ready_at TIMESTAMPTZ,
-
   downloaded_at TIMESTAMPTZ,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
   CONSTRAINT deliveries_portrait_count_check
-    CHECK (
-      portrait_count >= 0
-    )
+    CHECK (portrait_count >= 0)
 );
 
-/* =========================================================
-   DELIVERY FILES
-========================================================= */
+-- =========================================================
+-- DELIVERY FILES
+-- =========================================================
 
 CREATE TABLE delivery_files (
   id BIGSERIAL PRIMARY KEY,
@@ -951,9 +896,9 @@ CREATE TABLE delivery_files (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-/* =========================================================
-   DELETION REQUESTS
-========================================================= */
+-- =========================================================
+-- DELETION REQUESTS
+-- =========================================================
 
 CREATE TABLE deletion_requests (
   id BIGSERIAL PRIMARY KEY,
@@ -969,14 +914,12 @@ CREATE TABLE deletion_requests (
   requested_email VARCHAR(255),
 
   status deletion_status
-    NOT NULL
-    DEFAULT 'PENDING',
+    NOT NULL DEFAULT 'PENDING',
 
   reason TEXT,
 
   requested_at TIMESTAMPTZ
-    NOT NULL
-    DEFAULT NOW(),
+    NOT NULL DEFAULT NOW(),
 
   completed_at TIMESTAMPTZ,
 
@@ -994,9 +937,9 @@ CREATE TABLE deletion_requests (
     )
 );
 
-/* =========================================================
-   AUDIT LOGS
-========================================================= */
+-- =========================================================
+-- AUDIT LOGS
+-- =========================================================
 
 CREATE TABLE audit_logs (
   id BIGSERIAL PRIMARY KEY,
@@ -1020,26 +963,71 @@ CREATE TABLE audit_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- =========================================================
+-- COMPANY GALLERY SHARES
+-- CORRIGÉ : PARTAGE PAR CAMPAGNE
+-- =========================================================
 
-
-CREATE TABLE IF NOT EXISTS company_gallery_shares (
+CREATE TABLE company_gallery_shares (
   id BIGSERIAL PRIMARY KEY,
+
   company_id BIGINT NOT NULL
-    REFERENCES companies(id) ON DELETE CASCADE,
+    REFERENCES companies(id)
+    ON DELETE CASCADE,
+
+  campaign_id BIGINT NOT NULL,
+
   token_hash VARCHAR(64) NOT NULL UNIQUE,
-  ncrypted_token TEXT,
+
+  encrypted_token TEXT NOT NULL,
+
   created_by_user_id BIGINT NOT NULL
     REFERENCES users(id),
+
   expires_at TIMESTAMPTZ NOT NULL,
+
   revoked_at TIMESTAMPTZ,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT company_gallery_shares_campaign_fk
+    FOREIGN KEY (campaign_id)
+    REFERENCES campaigns(id)
+    ON DELETE CASCADE,
+
+  CONSTRAINT company_gallery_shares_token_hash_check
+    CHECK (token_hash ~ '^[a-fA-F0-9]{64}$')
+);
+
+-- =========================================================
+-- PASSWORD RESET TOKENS
+-- =========================================================
+
+CREATE TABLE password_reset_tokens (
+  id BIGSERIAL PRIMARY KEY,
+
+  user_id BIGINT NOT NULL
+    REFERENCES users(id)
+    ON DELETE CASCADE,
+
+  token_hash VARCHAR(64) NOT NULL UNIQUE,
+
+  expires_at TIMESTAMPTZ NOT NULL,
+
+  used_at TIMESTAMPTZ,
+
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- =========================================================
+-- INDEXES
+-- =========================================================
 
+CREATE INDEX idx_password_reset_user
+ON password_reset_tokens(user_id);
 
-/* =========================================================
-   INDEXES
-========================================================= */
+CREATE INDEX idx_password_reset_expiration
+ON password_reset_tokens(expires_at);
 
 CREATE INDEX idx_users_company
 ON users(company_id);
@@ -1109,15 +1097,28 @@ ON deliveries(campaign_id);
 
 CREATE INDEX idx_deletion_status
 ON deletion_requests(status);
-CREATE INDEX IF NOT EXISTS idx_company_gallery_shares_company
+
+-- =========================================================
+-- COMPANY GALLERY SHARES INDEXES
+-- =========================================================
+
+CREATE INDEX idx_company_gallery_shares_company
 ON company_gallery_shares(company_id);
 
-CREATE INDEX IF NOT EXISTS idx_company_gallery_shares_token
-ON company_gallery_shares(token_hash);
+CREATE INDEX idx_company_gallery_shares_campaign
+ON company_gallery_shares(campaign_id);
 
-/* =========================================================
-   UPDATED_AT
-========================================================= */
+-- token_hash possède déjà un index UNIQUE
+-- grâce à sa contrainte déclarée dans la table.
+
+CREATE UNIQUE INDEX ux_gallery_share_active_per_campaign
+ON company_gallery_shares(company_id, campaign_id)
+WHERE revoked_at IS NULL
+  AND campaign_id IS NOT NULL;
+
+-- =========================================================
+-- UPDATED_AT FUNCTION
+-- =========================================================
 
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
@@ -1126,6 +1127,10 @@ BEGIN
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+-- =========================================================
+-- UPDATED_AT TRIGGERS
+-- =========================================================
 
 CREATE TRIGGER users_updated_at
 BEFORE UPDATE ON users
@@ -1197,9 +1202,9 @@ BEFORE UPDATE ON deliveries
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
-/* =========================================================
-   INITIAL PLANS
-========================================================= */
+-- =========================================================
+-- INITIAL PLANS
+-- =========================================================
 
 INSERT INTO plans (
   code,
@@ -1254,9 +1259,9 @@ VALUES
   TRUE
 );
 
-/* =========================================================
-   INITIAL PORTRAIT STYLES
-========================================================= */
+-- =========================================================
+-- INITIAL PORTRAIT STYLES
+-- =========================================================
 
 INSERT INTO portrait_styles (
   name,

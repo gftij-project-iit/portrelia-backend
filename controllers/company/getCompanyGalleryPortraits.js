@@ -1,502 +1,61 @@
 
 const crypto = require("crypto");
-
 const { db } = require("../../config/db");
-
-const {
-  createClient,
-} = require("@supabase/supabase-js");
-
-/*
- * =========================================================
- * CONFIGURATION
- * =========================================================
- */
+const { createClient } = require("@supabase/supabase-js");
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
-
-const SUPABASE_SERVICE_ROLE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-const GENERATED_BUCKET =
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const BUCKET =
   process.env.SUPABASE_GENERATED_BUCKET ||
   process.env.SUPABASE_STORAGE_BUCKET;
 
-const SIGNED_URL_DURATION = 60 * 60;
-
 const PAGE_SIZE = 24;
-
 const MAX_PAGES = 100000;
-
-const SHARE_DURATION_DAYS = 7;
-
-/*
- * =========================================================
- * CLIENT SUPABASE
- * =========================================================
- *
- * On conserve la même configuration que l'ADMIN.
- */
+const SHARE_DAYS = 7;
+const SIGNED_URL_SECONDS = 3600;
 
 const supabase =
-  SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
-    ? createClient(
-        SUPABASE_URL,
-        SUPABASE_SERVICE_ROLE_KEY,
-        {
-          auth: {
-            persistSession: false,
-            autoRefreshToken: false,
-          },
-        }
-      )
+  SUPABASE_URL && SERVICE_KEY
+    ? createClient(SUPABASE_URL, SERVICE_KEY, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        },
+      })
     : null;
 
-/*
- * =========================================================
- * CACHE
- * =========================================================
- *
- * Les URL des portraits sont signées et temporaires.
- * Les réponses API ne doivent pas être mises en cache.
- */
-
-const disableGalleryCache = (res) => {
-  res.set(
-    "Cache-Control",
-    "private, no-store, max-age=0"
-  );
-
+const noCache = (res) => {
+  res.set("Cache-Control", "private, no-store, max-age=0");
   res.set("Pragma", "no-cache");
   res.set("Expires", "0");
   res.set("Referrer-Policy", "no-referrer");
 };
 
-/*
- * =========================================================
- * ERREUR DE STOCKAGE
- * =========================================================
- */
-
-class GalleryStorageError extends Error {
-  constructor(message) {
-    super(message);
-
-    this.name = "GalleryStorageError";
-    this.statusCode = 502;
-  }
-}
-
-const sendGalleryError = (
-  res,
-  error,
-  fallbackMessage
-) => {
-  console.error("[COMPANY GALLERY]", {
-    name: error.name,
-    message: error.message,
-  });
-
-  if (error instanceof GalleryStorageError) {
-    return res.status(502).json({
-      success: false,
-      message: error.message,
-    });
-  }
-
+const fail = (res, error, message) => {
+  console.error("[COMPANY GALLERY]", error);
   return res.status(500).json({
     success: false,
-    message: fallbackMessage,
+    message,
   });
 };
 
-/*
- * =========================================================
- * NORMALISATION DU CHEMIN SUPABASE
- * =========================================================
- *
- * On accepte :
- * - un chemin relatif au bucket ;
- * - un chemin préfixé par le bucket ;
- * - une URL Supabase du même projet.
- */
-
-const normalizeStorageKey = (value) => {
+const positiveId = (value) => {
   if (
-    !value ||
-    typeof value !== "string"
+    value === undefined ||
+    value === null ||
+    value === ""
   ) {
     return null;
   }
 
-  let key = value.trim();
-
-  if (!key) {
-    return null;
-  }
-
-  if (/^https?:\/\//i.test(key)) {
-    let url;
-
-    try {
-      url = new URL(key);
-    } catch {
-      throw new GalleryStorageError(
-        "Le chemin du portrait est invalide."
-      );
-    }
-
-    if (!SUPABASE_URL) {
-      throw new GalleryStorageError(
-        "Configuration Supabase manquante."
-      );
-    }
-
-    const configuredUrl = new URL(SUPABASE_URL);
-
-    if (url.origin !== configuredUrl.origin) {
-      throw new GalleryStorageError(
-        "Le portrait référence un stockage non autorisé."
-      );
-    }
-
-    const markers = [
-      `/storage/v1/object/public/${GENERATED_BUCKET}/`,
-      `/storage/v1/object/sign/${GENERATED_BUCKET}/`,
-      `/storage/v1/object/authenticated/${GENERATED_BUCKET}/`,
-    ];
-
-    const marker = markers.find((item) =>
-      url.pathname.includes(item)
-    );
-
-    if (!marker) {
-      throw new GalleryStorageError(
-        "Le chemin Supabase du portrait est invalide."
-      );
-    }
-
-    key = url.pathname.split(marker)[1] || "";
-  }
-
-  key = key.replace(/^\/+/, "");
-
-  const bucketPrefix = `${GENERATED_BUCKET}/`;
-
-  if (key.startsWith(bucketPrefix)) {
-    key = key.slice(bucketPrefix.length);
-  }
-
-  try {
-    key = decodeURIComponent(key);
-  } catch {
-    throw new GalleryStorageError(
-      "Le chemin du portrait contient un encodage invalide."
-    );
-  }
-
-  if (
-    !key ||
-    key.includes("\\") ||
-    key.split("/").some(
-      (segment) =>
-        segment === ".." ||
-        segment === "."
-    )
-  ) {
-    throw new GalleryStorageError(
-      "Le chemin de stockage du portrait est invalide."
-    );
-  }
-
-  return key;
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number > 0
+    ? number
+    : null;
 };
 
-/*
- * =========================================================
- * SIGNED URL SUPABASE
- * =========================================================
- *
- * On garde le fonctionnement qui affiche déjà
- * les images dans tes deux galeries.
- */
-
-const createSignedImageUrl = async (
-  storageKey,
-  portraitId
-) => {
-  if (!supabase) {
-    throw new GalleryStorageError(
-      "Le stockage des portraits n'est pas configuré."
-    );
-  }
-
-  if (!GENERATED_BUCKET) {
-    throw new GalleryStorageError(
-      "Le bucket des portraits n'est pas configuré."
-    );
-  }
-
-  const normalizedKey =
-    normalizeStorageKey(storageKey);
-
-  if (!normalizedKey) {
-    throw new GalleryStorageError(
-      "Le fichier du portrait final est introuvable."
-    );
-  }
-
-  try {
-    const { data, error } = await supabase
-      .storage
-      .from(GENERATED_BUCKET)
-      .createSignedUrl(
-        normalizedKey,
-        SIGNED_URL_DURATION
-      );
-
-    if (error) {
-      console.error(
-        "[COMPANY GALLERY] Supabase signing failed",
-        {
-          portraitId,
-          bucket: GENERATED_BUCKET,
-          error: error.message,
-        }
-      );
-
-      throw new GalleryStorageError(
-        "Impossible de charger l'image du portrait depuis Supabase."
-      );
-    }
-
-    const signedUrl = data?.signedUrl;
-
-    if (!signedUrl) {
-      throw new GalleryStorageError(
-        "Supabase n'a pas retourné d'URL pour le portrait."
-      );
-    }
-
-    let parsedUrl;
-
-    try {
-      parsedUrl = new URL(signedUrl);
-    } catch {
-      throw new GalleryStorageError(
-        "Supabase a retourné une URL d'image invalide."
-      );
-    }
-
-    if (
-      parsedUrl.protocol !== "https:" ||
-      parsedUrl.origin !==
-        new URL(SUPABASE_URL).origin
-    ) {
-      throw new GalleryStorageError(
-        "L'URL du portrait n'est pas une URL Supabase HTTPS valide."
-      );
-    }
-
-    return signedUrl;
-  } catch (error) {
-    if (error instanceof GalleryStorageError) {
-      throw error;
-    }
-
-    console.error(
-      "[COMPANY GALLERY] Supabase exception",
-      {
-        portraitId,
-        message: error.message,
-      }
-    );
-
-    throw new GalleryStorageError(
-      "Erreur de communication avec le stockage Supabase."
-    );
-  }
-};
-
-/*
- * =========================================================
- * HASH DU TOKEN
- * =========================================================
- *
- * Le hash reste utilisé pour vérifier les liens publics.
- *
- * Il n'est pas possible de retrouver le token
- * original à partir de ce hash.
- */
-
-const hashToken = (token) => {
-  return crypto
-    .createHash("sha256")
-    .update(token)
-    .digest("hex");
-};
-
-/*
- * =========================================================
- * NOUVEAU — CLÉ DE CHIFFREMENT
- * =========================================================
- *
- * Variable backend :
- *
- * GALLERY_TOKEN_ENCRYPTION_KEY
- *
- * Clé AES-256 de 32 octets,
- * représentée par 64 caractères hexadécimaux.
- *
- * La même clé doit être configurée sur Render
- * et dans l'environnement local.
- */
-
-const getGalleryEncryptionKey = () => {
-  const value =
-    process.env.GALLERY_TOKEN_ENCRYPTION_KEY;
-
-  if (
-    !value ||
-    !/^[a-f0-9]{64}$/i.test(value)
-  ) {
-    throw new Error(
-      "GALLERY_TOKEN_ENCRYPTION_KEY doit contenir exactement 64 caractères hexadécimaux."
-    );
-  }
-
-  return Buffer.from(value, "hex");
-};
-
-/*
- * =========================================================
- * NOUVEAU — CHIFFRER UN TOKEN
- * =========================================================
- *
- * AES-256-GCM.
- *
- * Chaque chiffrement utilise un IV différent.
- *
- * Format enregistré en BDD :
- *
- * iv:tag:contenu_chiffre
- *
- * Le token original n'est pas stocké en clair.
- */
-
-const encryptGalleryToken = (token) => {
-  if (
-    typeof token !== "string" ||
-    !/^[a-f0-9]{64}$/.test(token)
-  ) {
-    throw new Error(
-      "Token de partage invalide."
-    );
-  }
-
-  const key = getGalleryEncryptionKey();
-
-  const iv = crypto.randomBytes(12);
-
-  const cipher = crypto.createCipheriv(
-    "aes-256-gcm",
-    key,
-    iv
-  );
-
-  const encrypted = Buffer.concat([
-    cipher.update(token, "utf8"),
-    cipher.final(),
-  ]);
-
-  const tag = cipher.getAuthTag();
-
-  return [
-    iv.toString("hex"),
-    tag.toString("hex"),
-    encrypted.toString("hex"),
-  ].join(":");
-};
-
-/*
- * =========================================================
- * NOUVEAU — DÉCHIFFRER UN TOKEN
- * =========================================================
- *
- * Utilisé seulement par le propriétaire
- * connecté pour retrouver son lien actif.
- */
-
-const decryptGalleryToken = (encryptedToken) => {
-  if (!encryptedToken) {
-    return null;
-  }
-
-  if (typeof encryptedToken !== "string") {
-    throw new Error(
-      "Token chiffré invalide."
-    );
-  }
-
-  const parts = encryptedToken.split(":");
-
-  if (parts.length !== 3) {
-    throw new Error(
-      "Format du token chiffré invalide."
-    );
-  }
-
-  const [ivHex, tagHex, dataHex] = parts;
-
-  if (
-    !/^[a-f0-9]{24}$/i.test(ivHex) ||
-    !/^[a-f0-9]{32}$/i.test(tagHex) ||
-    !/^[a-f0-9]+$/i.test(dataHex) ||
-    dataHex.length % 2 !== 0
-  ) {
-    throw new Error(
-      "Données de chiffrement invalides."
-    );
-  }
-
-  const decipher = crypto.createDecipheriv(
-    "aes-256-gcm",
-    getGalleryEncryptionKey(),
-    Buffer.from(ivHex, "hex")
-  );
-
-  decipher.setAuthTag(
-    Buffer.from(tagHex, "hex")
-  );
-
-  const decrypted = Buffer.concat([
-    decipher.update(
-      Buffer.from(dataHex, "hex")
-    ),
-    decipher.final(),
-  ]);
-
-  const token = decrypted.toString("utf8");
-
-  if (!/^[a-f0-9]{64}$/.test(token)) {
-    throw new Error(
-      "Token déchiffré invalide."
-    );
-  }
-
-  return token;
-};
-
-/*
- * =========================================================
- * PAGINATION
- * =========================================================
- */
-
-const getPagination = (cursor) => {
-  if (cursor === undefined) {
-    return 0;
-  }
+const getOffset = (cursor) => {
+  if (cursor === undefined) return 0;
 
   if (
     typeof cursor !== "string" ||
@@ -509,7 +68,6 @@ const getPagination = (cursor) => {
 
   if (
     !Number.isSafeInteger(offset) ||
-    offset < 0 ||
     offset > MAX_PAGES * PAGE_SIZE ||
     offset % PAGE_SIZE !== 0
   ) {
@@ -519,152 +77,314 @@ const getPagination = (cursor) => {
   return offset;
 };
 
-/*
- * =========================================================
- * FORMAT PORTRAIT
- * =========================================================
- */
+const hashToken = (value) =>
+  crypto
+    .createHash("sha256")
+    .update(value)
+    .digest("hex");
 
-const formatPortrait = async (row) => {
-  const imageUrl = await createSignedImageUrl(
-    row.storageKey,
-    row.id
+const encryptionKey = () => {
+  const raw = process.env.GALLERY_TOKEN_ENCRYPTION_KEY;
+
+  if (!/^[a-f0-9]{64}$/i.test(raw || "")) {
+    throw new Error(
+      "GALLERY_TOKEN_ENCRYPTION_KEY invalide."
+    );
+  }
+
+  return Buffer.from(raw, "hex");
+};
+
+const encryptToken = (token) => {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv(
+    "aes-256-gcm",
+    encryptionKey(),
+    iv
   );
 
-  return {
-    id: row.id,
+  const ciphertext = Buffer.concat([
+    cipher.update(token, "utf8"),
+    cipher.final(),
+  ]);
 
-    participantId: row.participantId,
+  return [
+    iv.toString("hex"),
+    cipher.getAuthTag().toString("hex"),
+    ciphertext.toString("hex"),
+  ].join(":");
+};
 
-    firstName: row.firstName,
-    lastName: row.lastName,
+const decryptToken = (value) => {
+  if (!value) return null;
 
-    campaignId: row.campaignId,
-    campaignName: row.campaignName,
+  const parts = value.split(":");
 
-    styleName:
-      row.styleName ||
-      "Portrait professionnel",
+  if (
+    parts.length !== 3 ||
+    !/^[a-f0-9]{24}$/i.test(parts[0]) ||
+    !/^[a-f0-9]{32}$/i.test(parts[1]) ||
+    !/^[a-f0-9]+$/i.test(parts[2]) ||
+    parts[2].length % 2 !== 0
+  ) {
+    throw new Error("Token chiffré invalide.");
+  }
 
-    imageUrl,
+  const decipher = crypto.createDecipheriv(
+    "aes-256-gcm",
+    encryptionKey(),
+    Buffer.from(parts[0], "hex")
+  );
 
-    downloadUrl: null,
-    canDownload: false,
+  decipher.setAuthTag(Buffer.from(parts[1], "hex"));
 
-    createdAt: row.selectedAt,
-  };
+  const token = Buffer.concat([
+    decipher.update(Buffer.from(parts[2], "hex")),
+    decipher.final(),
+  ]).toString("utf8");
+
+  if (!/^[a-f0-9]{64}$/.test(token)) {
+    throw new Error("Token déchiffré invalide.");
+  }
+
+  return token;
+};
+
+const frontendOrigin = () => {
+  const value = process.env.FRONTEND_URL?.trim();
+
+  if (!value) {
+    throw new Error("FRONTEND_URL manquante.");
+  }
+
+  const url = new URL(value);
+  const localhost =
+    url.protocol === "http:" &&
+    ["localhost", "127.0.0.1"].includes(url.hostname);
+
+  if (
+    (url.protocol !== "https:" && !localhost) ||
+    (process.env.NODE_ENV === "production" &&
+      url.protocol !== "https:") ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error("FRONTEND_URL invalide.");
+  }
+
+  return url.origin;
 };
 
 /*
- * =========================================================
- * RÉCUPÉRATION DES PORTRAITS FINAUX
- * =========================================================
+ * NORMALISATION SUPABASE
+ * Même fonctionnement que la version entreprise validée.
+ */
+
+const normalizeStorageKey = (storageKey) => {
+  if (
+    typeof storageKey !== "string" ||
+    !storageKey.trim()
+  ) {
+    throw new Error("Chemin du portrait manquant.");
+  }
+
+  if (!SUPABASE_URL || !BUCKET) {
+    throw new Error("Configuration Supabase incomplète.");
+  }
+
+  let key = storageKey.trim();
+
+  if (/^https?:\/\//i.test(key)) {
+    const url = new URL(key);
+
+    if (url.origin !== new URL(SUPABASE_URL).origin) {
+      throw new Error("Stockage non autorisé.");
+    }
+
+    const markers = [
+      `/storage/v1/object/public/${BUCKET}/`,
+      `/storage/v1/object/sign/${BUCKET}/`,
+      `/storage/v1/object/authenticated/${BUCKET}/`,
+    ];
+
+    const marker = markers.find((item) =>
+      url.pathname.includes(item)
+    );
+
+    if (!marker) {
+      throw new Error("URL Supabase invalide.");
+    }
+
+    key = url.pathname.split(marker)[1] || "";
+  }
+
+  key = key.replace(/^\/+/, "");
+
+  if (key.startsWith(`${BUCKET}/`)) {
+    key = key.slice(BUCKET.length + 1);
+  }
+
+  try {
+    key = decodeURIComponent(key);
+  } catch {
+    throw new Error("Encodage du portrait invalide.");
+  }
+
+  if (
+    !key ||
+    key.includes("\\") ||
+    key.split("/").some(
+      (part) => part === "." || part === ".."
+    )
+  ) {
+    throw new Error("Clé de stockage invalide.");
+  }
+
+  return key;
+};
+
+const signedPortraitUrl = async (storageKey, portraitId) => {
+  if (!supabase || !BUCKET) {
+    throw new Error("Supabase non configuré.");
+  }
+
+  const key = normalizeStorageKey(storageKey);
+
+  const { data, error } = await supabase
+    .storage
+    .from(BUCKET)
+    .createSignedUrl(key, SIGNED_URL_SECONDS);
+
+  if (error || !data?.signedUrl) {
+    console.error("[GALLERY] SUPABASE SIGN", {
+      portraitId,
+      message: error?.message,
+      bucket: BUCKET,
+    });
+
+    throw new Error(
+      "Impossible de signer le portrait final."
+    );
+  }
+
+  const url = new URL(data.signedUrl);
+
+  if (
+    url.protocol !== "https:" ||
+    url.origin !== new URL(SUPABASE_URL).origin
+  ) {
+    throw new Error("URL du portrait non autorisée.");
+  }
+
+  return data.signedUrl;
+};
+
+const verifyCompanyCampaign = async (
+  executor,
+  companyId,
+  campaignId,
+  lock = false
+) => {
+  const result = await executor.query(
+    `
+    SELECT c.id, c.name
+    FROM campaigns c
+    JOIN companies co ON co.id = c.company_id
+    WHERE c.id = $1
+      AND c.company_id = $2
+      AND co.status = 'ACTIVE'
+    ${lock ? "FOR UPDATE OF c" : ""}
+    `,
+    [campaignId, companyId]
+  );
+
+  return result.rows[0] || null;
+};
+
+/*
+ * LISTE DES PORTRAITS FINAUX
  *
- * Structure BDD identique à ton ADMIN.
- *
- * On limite toujours aux campagnes
- * appartenant à l'entreprise concernée.
+ * campaignId = null : galerie privée globale de l'entreprise
+ * campaignId fourni : uniquement la campagne du lien public
  */
 
 const fetchFinalPortraits = async (
   companyId,
+  campaignId,
   offset
 ) => {
   const result = await db.query(
     `
     SELECT
       gp.id,
-
-      gp.storage_key
-        AS "storageKey",
-
-      p.id
-        AS "participantId",
-
-      p.first_name
-        AS "firstName",
-
-      p.last_name
-        AS "lastName",
-
-      c.id
-        AS "campaignId",
-
-      c.name
-        AS "campaignName",
-
-      pst.name
-        AS "styleName",
-
-      COALESCE(
-        ps.updated_at,
-        ps.created_at
-      ) AS "selectedAt"
-
+      gp.storage_key AS "storageKey",
+      p.id AS "participantId",
+      p.first_name AS "firstName",
+      p.last_name AS "lastName",
+      c.id AS "campaignId",
+      c.name AS "campaignName",
+      pst.name AS "styleName",
+      COALESCE(ps.updated_at, ps.created_at)
+        AS "selectedAt"
     FROM galleries g
-
-    INNER JOIN participants p
+    JOIN participants p
       ON p.id = g.participant_id
-
-    INNER JOIN campaigns c
+    JOIN campaigns c
       ON c.id = p.campaign_id
-
-    INNER JOIN participant_selections ps
+    JOIN participant_selections ps
       ON ps.participant_id = p.id
       AND ps.is_final_selection = TRUE
-
-    INNER JOIN generated_portraits gp
+    JOIN generated_portraits gp
       ON gp.id = ps.portrait_id
-
     LEFT JOIN portrait_styles pst
       ON pst.id = c.style_id
-
-    WHERE
-      c.company_id = $1
-
+    WHERE c.company_id = $1
+      AND ($2::BIGINT IS NULL OR c.id = $2)
       AND g.published_at IS NOT NULL
-
-      AND (
-        g.expires_at IS NULL
-        OR g.expires_at > NOW()
-      )
-
+      AND (g.expires_at IS NULL OR g.expires_at > NOW())
       AND gp.storage_key IS NOT NULL
-
       AND TRIM(gp.storage_key) <> ''
-
     ORDER BY
-      COALESCE(
-        ps.updated_at,
-        ps.created_at
-      ) DESC,
+      COALESCE(ps.updated_at, ps.created_at) DESC,
       gp.id DESC
-
-    LIMIT $2
-    OFFSET $3
+    LIMIT $3
+    OFFSET $4
     `,
-    [
-      companyId,
-      PAGE_SIZE + 1,
-      offset,
-    ]
+    [companyId, campaignId, PAGE_SIZE + 1, offset]
   );
 
-  const hasMore =
-    result.rows.length > PAGE_SIZE;
-
-  const page =
-    result.rows.slice(0, PAGE_SIZE);
+  const hasMore = result.rows.length > PAGE_SIZE;
 
   const portraits = await Promise.all(
-    page.map(formatPortrait)
+    result.rows.slice(0, PAGE_SIZE).map(async (row) => {
+      const imageUrl = await signedPortraitUrl(
+        row.storageKey,
+        row.id
+      );
+
+      return {
+        id: row.id,
+        participantId: row.participantId,
+        firstName: row.firstName,
+        lastName: row.lastName,
+        campaignId: row.campaignId,
+        campaignName: row.campaignName,
+        styleName:
+          row.styleName || "Portrait professionnel",
+        imageUrl,
+        downloadUrl: null,
+        canDownload: false,
+        createdAt: row.selectedAt,
+      };
+    })
   );
 
   return {
     portraits,
-
     hasMore,
-
     nextCursor: hasMore
       ? String(offset + PAGE_SIZE)
       : null,
@@ -672,50 +392,42 @@ const fetchFinalPortraits = async (
 };
 
 /*
- * =========================================================
  * GET /company/gallery/portraits
- * =========================================================
+ *
+ * Conserve la galerie privée regroupant
+ * tous les portraits de l'entreprise.
  */
 
-const getCompanyGalleryPortraits = async (
-  req,
-  res
-) => {
-  disableGalleryCache(res);
+const getCompanyGalleryPortraits = async (req, res) => {
+  noCache(res);
+
+  const companyId = positiveId(req.user?.companyId);
+  const offset = getOffset(req.query.cursor);
+
+  if (!companyId) {
+    return res.status(403).json({
+      success: false,
+      message: "Entreprise introuvable.",
+    });
+  }
+
+  if (offset === null) {
+    return res.status(400).json({
+      success: false,
+      message: "Pagination invalide.",
+    });
+  }
 
   try {
-    const companyId =
-      req.user?.companyId;
-
-    if (!companyId) {
-      return res.status(403).json({
-        success: false,
-        message: "Entreprise introuvable.",
-      });
-    }
-
-    const offset = getPagination(
-      req.query.cursor
-    );
-
-    if (offset === null) {
-      return res.status(400).json({
-        success: false,
-        message: "Pagination invalide.",
-      });
-    }
-
     const data = await fetchFinalPortraits(
       companyId,
+      null,
       offset
     );
 
-    return res.status(200).json({
-      success: true,
-      data,
-    });
+    return res.json({ success: true, data });
   } catch (error) {
-    return sendGalleryError(
+    return fail(
       res,
       error,
       "Impossible de charger les portraits."
@@ -724,95 +436,65 @@ const getCompanyGalleryPortraits = async (
 };
 
 /*
- * =========================================================
- * ADRESSE DU FRONTEND
- * =========================================================
+ * GET /company/gallery/campaigns
  *
- * Aucune URL codée en dur.
- *
- * FRONTEND_URL est fournie par .env ou Render.
+ * Liste les campagnes de l'entreprise.
+ * Sert au menu de sélection du partage.
  */
 
-const getFrontendUrl = () => {
-  const configuredUrl =
-    process.env.FRONTEND_URL?.trim();
+const getCompanyGalleryCampaigns = async (req, res) => {
+  noCache(res);
 
-  if (!configuredUrl) {
-    throw new Error(
-      "FRONTEND_URL invalide ou manquante."
-    );
+  const companyId = positiveId(req.user?.companyId);
+
+  if (!companyId) {
+    return res.status(403).json({
+      success: false,
+      message: "Entreprise introuvable.",
+    });
   }
-
-  let parsed;
 
   try {
-    parsed = new URL(configuredUrl);
-  } catch {
-    throw new Error(
-      "FRONTEND_URL invalide ou manquante."
+    const result = await db.query(
+      `
+      SELECT c.id, c.name
+      FROM campaigns c
+      JOIN companies co ON co.id = c.company_id
+      WHERE c.company_id = $1
+        AND co.status = 'ACTIVE'
+      ORDER BY c.name ASC, c.id ASC
+      `,
+      [companyId]
+    );
+
+    return res.json({
+      success: true,
+      campaigns: result.rows,
+    });
+  } catch (error) {
+    return fail(
+      res,
+      error,
+      "Impossible de charger les campagnes."
     );
   }
-
-  const production =
-    process.env.NODE_ENV === "production";
-
-  const isHttps =
-    parsed.protocol === "https:";
-
-  const isLocalHttp =
-    parsed.protocol === "http:" &&
-    ["localhost", "127.0.0.1"].includes(
-      parsed.hostname
-    );
-
-  if (
-    (production && !isHttps) ||
-    (!production &&
-      !isHttps &&
-      !isLocalHttp)
-  ) {
-    throw new Error(
-      "FRONTEND_URL doit utiliser HTTPS en production."
-    );
-  }
-
-  if (
-    parsed.username ||
-    parsed.password ||
-    parsed.search ||
-    parsed.hash ||
-    parsed.pathname !== "/"
-  ) {
-    throw new Error(
-      "FRONTEND_URL doit contenir uniquement l'origine du site."
-    );
-  }
-
-  return parsed.origin;
 };
 
 /*
- * =========================================================
  * POST /company/gallery/share
- * =========================================================
  *
- * NOUVEAU :
- * on enregistre token_hash ET encrypted_token.
+ * Body : { campaignId }
  *
- * Les nouveaux liens remplacent les anciens.
+ * Remplace seulement le lien de cette campagne.
+ * Ne touche jamais aux liens des autres campagnes.
  */
 
-const createCompanyGalleryShare = async (
-  req,
-  res
-) => {
-  disableGalleryCache(res);
+const createCompanyGalleryShare = async (req, res) => {
+  noCache(res);
 
-  const companyId =
-    req.user?.companyId;
-
-  const userId =
-    req.user?.id;
+  const companyId = positiveId(req.user?.companyId);
+  const userId = positiveId(req.user?.id);
+  const campaignId = positiveId(req.body?.campaignId);
 
   if (!companyId || !userId) {
     return res.status(403).json({
@@ -821,123 +503,89 @@ const createCompanyGalleryShare = async (
     });
   }
 
-  let frontendUrl;
-  let token;
-  let tokenHash;
-  let encryptedToken;
-
-  /*
-   * Préparation du lien AVANT la transaction.
-   *
-   * Si la clé de chiffrement est incorrecte,
-   * aucun lien existant ne sera révoqué.
-   */
-
-  try {
-    frontendUrl = getFrontendUrl();
-
-    token = crypto
-      .randomBytes(32)
-      .toString("hex");
-
-    tokenHash =
-      hashToken(token);
-
-    encryptedToken =
-      encryptGalleryToken(token);
-  } catch (error) {
-    console.error(
-      "[COMPANY GALLERY] SHARE CONFIG:",
-      error.message
-    );
-
-    return res.status(500).json({
+  if (!campaignId) {
+    return res.status(400).json({
       success: false,
-      message:
-        "Configuration du partage indisponible.",
+      message: "Veuillez sélectionner une campagne.",
     });
   }
 
-  const client = await db.connect();
+  let token;
+  let tokenHash;
+  let encryptedToken;
+  let origin;
 
   try {
+    origin = frontendOrigin();
+    token = crypto.randomBytes(32).toString("hex");
+    tokenHash = hashToken(token);
+    encryptedToken = encryptToken(token);
+  } catch (error) {
+    return fail(
+      res,
+      error,
+      "Configuration du partage indisponible."
+    );
+  }
+
+  let client;
+
+  try {
+    client = await db.connect();
     await client.query("BEGIN");
 
-    /*
-     * Verrouillage de l'entreprise.
-     */
-
-    const companyResult = await client.query(
-      `
-      SELECT id
-      FROM companies
-      WHERE id = $1
-        AND status = 'ACTIVE'
-      FOR UPDATE
-      `,
-      [companyId]
+    const campaign = await verifyCompanyCampaign(
+      client,
+      companyId,
+      campaignId,
+      true
     );
 
-    if (companyResult.rows.length === 0) {
+    if (!campaign) {
       await client.query("ROLLBACK");
 
-      return res.status(403).json({
+      return res.status(404).json({
         success: false,
-        message:
-          "Entreprise inactive ou introuvable.",
+        message: "Campagne introuvable.",
       });
     }
-
-    /*
-     * Désactivation des anciens liens.
-     */
 
     await client.query(
       `
       UPDATE company_gallery_shares
       SET revoked_at = NOW()
       WHERE company_id = $1
+        AND campaign_id = $2
         AND revoked_at IS NULL
       `,
-      [companyId]
+      [companyId, campaignId]
     );
-
-    /*
-     * Création du nouveau lien avec :
-     *
-     * token_hash : vérification publique
-     * encrypted_token : récupération privée
-     */
 
     const result = await client.query(
       `
       INSERT INTO company_gallery_shares (
         company_id,
+        campaign_id,
         token_hash,
         encrypted_token,
         created_by_user_id,
         expires_at
       )
       VALUES (
-        $1,
-        $2,
-        $3,
-        $4,
-        NOW() + (
-          $5::INTEGER * INTERVAL '1 day'
-        )
+        $1, $2, $3, $4, $5,
+        NOW() + ($6::INTEGER * INTERVAL '1 day')
       )
       RETURNING
         id,
-        created_at AS "createdAt",
         expires_at AS "expiresAt"
       `,
       [
         companyId,
+        campaignId,
         tokenHash,
         encryptedToken,
         userId,
-        SHARE_DURATION_DAYS,
+        SHARE_DAYS,
       ]
     );
 
@@ -945,65 +593,62 @@ const createCompanyGalleryShare = async (
 
     return res.status(201).json({
       success: true,
-
-      message:
-        "Lien de partage créé.",
-
-      shareUrl:
-        `${frontendUrl}/galerie-partagee/${token}`,
-
-      expiresAt:
-        result.rows[0].expiresAt,
+      message: "Lien de campagne créé.",
+      campaignId,
+      campaignName: campaign.name,
+      shareUrl: `${origin}/galerie-partagee/${token}`,
+      expiresAt: result.rows[0].expiresAt,
     });
   } catch (error) {
-    await client
-      .query("ROLLBACK")
-      .catch(() => {});
+    if (client) {
+      await client.query("ROLLBACK").catch(() => {});
+    }
 
-    console.error(
-      "[COMPANY GALLERY] CREATE SHARE ERROR:",
-      error
+    return fail(
+      res,
+      error,
+      "Impossible de créer le partage."
     );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Impossible de créer le lien de partage.",
-    });
   } finally {
-    client.release();
+    client?.release();
   }
 };
 
 /*
- * =========================================================
- * GET /company/gallery/share
- * =========================================================
- *
- * CORRECTION PRINCIPALE :
- *
- * Le lien existant est maintenant retrouvé
- * depuis PostgreSQL.
- *
- * On déchiffre le token uniquement pour
- * le compte entreprise authentifié.
+ * GET /company/gallery/share?campaignId=...
  */
 
-const getCompanyGalleryShare = async (
-  req,
-  res
-) => {
-  disableGalleryCache(res);
+const getCompanyGalleryShare = async (req, res) => {
+  noCache(res);
+
+  const companyId = positiveId(req.user?.companyId);
+  const campaignId = positiveId(req.query.campaignId);
+
+  if (!companyId) {
+    return res.status(403).json({
+      success: false,
+      message: "Entreprise introuvable.",
+    });
+  }
+
+  if (!campaignId) {
+    return res.status(400).json({
+      success: false,
+      message: "Sélectionnez une campagne.",
+    });
+  }
 
   try {
-    const companyId =
-      req.user?.companyId;
+    const campaign = await verifyCompanyCampaign(
+      db,
+      companyId,
+      campaignId
+    );
 
-    if (!companyId) {
-      return res.status(403).json({
+    if (!campaign) {
+      return res.status(404).json({
         success: false,
-        message:
-          "Entreprise introuvable.",
+        message: "Campagne introuvable.",
       });
     }
 
@@ -1011,159 +656,110 @@ const getCompanyGalleryShare = async (
       `
       SELECT
         id,
-
-        token_hash
-          AS "tokenHash",
-
-        encrypted_token
-          AS "encryptedToken",
-
-        created_at
-          AS "createdAt",
-
-        expires_at
-          AS "expiresAt"
-
+        token_hash AS "tokenHash",
+        encrypted_token AS "encryptedToken",
+        created_at AS "createdAt",
+        expires_at AS "expiresAt"
       FROM company_gallery_shares
-
-      WHERE
-        company_id = $1
+      WHERE company_id = $1
+        AND campaign_id = $2
         AND revoked_at IS NULL
         AND expires_at > NOW()
-
-      ORDER BY
-        created_at DESC,
-        id DESC
-
+      ORDER BY created_at DESC, id DESC
       LIMIT 1
       `,
-      [companyId]
+      [companyId, campaignId]
     );
 
-    /*
-     * Aucun partage actif.
-     */
-
-    if (result.rows.length === 0) {
-      return res.status(200).json({
+    if (!result.rows.length) {
+      return res.json({
         success: true,
-
         active: false,
-
+        campaignId,
+        campaignName: campaign.name,
         share: null,
-
         shareUrl: null,
       });
     }
 
-    const share =
-      result.rows[0];
-
+    const share = result.rows[0];
     let shareUrl = null;
 
-    /*
-     * Les anciens liens, créés avant
-     * l'ajout du chiffrement, ont encrypted_token NULL.
-     *
-     * Ils restent actifs mais leur URL
-     * n'est pas récupérable depuis le hash.
-     */
-
     if (share.encryptedToken) {
-      const token = decryptGalleryToken(
-        share.encryptedToken
-      );
-
-      /*
-       * On vérifie que la version chiffrée
-       * correspond bien au hash enregistré.
-       */
-
-      const calculatedHash =
-        hashToken(token);
-
-      const expectedHash =
-        share.tokenHash;
+      const token = decryptToken(share.encryptedToken);
 
       if (
-        !/^[a-f0-9]{64}$/.test(expectedHash) ||
+        !/^[a-f0-9]{64}$/i.test(share.tokenHash || "") ||
         !crypto.timingSafeEqual(
-          Buffer.from(calculatedHash, "hex"),
-          Buffer.from(expectedHash, "hex")
+          Buffer.from(hashToken(token), "hex"),
+          Buffer.from(share.tokenHash, "hex")
         )
       ) {
-        throw new Error(
-          "Le token ne correspond pas au partage enregistré."
-        );
+        throw new Error("Hash de partage incohérent.");
       }
 
-      const frontendUrl =
-        getFrontendUrl();
-
       shareUrl =
-        `${frontendUrl}/galerie-partagee/${token}`;
+        `${frontendOrigin()}/galerie-partagee/${token}`;
     }
 
-    /*
-     * On ne renvoie jamais :
-     *
-     * - token_hash
-     * - encrypted_token
-     * - clé de chiffrement
-     *
-     * Uniquement l'URL pour l'entreprise connectée.
-     */
-
-    return res.status(200).json({
+    return res.json({
       success: true,
-
       active: true,
-
+      campaignId,
+      campaignName: campaign.name,
       share: {
         id: share.id,
         createdAt: share.createdAt,
         expiresAt: share.expiresAt,
       },
-
       shareUrl,
     });
   } catch (error) {
-    console.error(
-      "[COMPANY GALLERY] GET SHARE ERROR:",
-      error.message
+    return fail(
+      res,
+      error,
+      "Impossible de récupérer le partage."
     );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Impossible de récupérer le lien de partage.",
-    });
   }
 };
 
 /*
- * =========================================================
- * DELETE /company/gallery/share
- * =========================================================
+ * DELETE /company/gallery/share?campaignId=...
  *
- * Le bouton Désactiver fonctionne comme avant.
+ * Révoque uniquement le partage sélectionné.
  */
 
-const revokeCompanyGalleryShare = async (
-  req,
-  res
-) => {
-  disableGalleryCache(res);
+const revokeCompanyGalleryShare = async (req, res) => {
+  noCache(res);
+
+  const companyId = positiveId(req.user?.companyId);
+  const campaignId = positiveId(req.query.campaignId);
+
+  if (!companyId) {
+    return res.status(403).json({
+      success: false,
+      message: "Entreprise introuvable.",
+    });
+  }
+
+  if (!campaignId) {
+    return res.status(400).json({
+      success: false,
+      message: "Sélectionnez une campagne.",
+    });
+  }
 
   try {
-    const companyId =
-      req.user?.companyId;
+    const campaign = await verifyCompanyCampaign(
+      db,
+      companyId,
+      campaignId
+    );
 
-    if (!companyId) {
-      return res.status(403).json({
+    if (!campaign) {
+      return res.status(404).json({
         success: false,
-        message:
-          "Entreprise introuvable.",
+        message: "Campagne introuvable.",
       });
     }
 
@@ -1171,116 +767,82 @@ const revokeCompanyGalleryShare = async (
       `
       UPDATE company_gallery_shares
       SET revoked_at = NOW()
-
-      WHERE
-        company_id = $1
+      WHERE company_id = $1
+        AND campaign_id = $2
         AND revoked_at IS NULL
       `,
-      [companyId]
+      [companyId, campaignId]
     );
 
-    return res.status(200).json({
+    return res.json({
       success: true,
-      message:
-        "Le lien public a été désactivé.",
+      campaignId,
+      message: "Lien de la campagne désactivé.",
     });
   } catch (error) {
-    console.error(
-      "[COMPANY GALLERY] REVOKE ERROR:",
-      error
+    return fail(
+      res,
+      error,
+      "Impossible de désactiver le partage."
     );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Impossible de désactiver le lien.",
-    });
   }
 };
 
 /*
- * =========================================================
  * GET /public/gallery/:token
- * =========================================================
  *
- * Aucun changement du fonctionnement public.
- *
- * Le visiteur utilise le token dans son URL.
- * Le backend vérifie son hash en BDD.
+ * Le token identifie une campagne précise.
+ * Aucun portrait d'une autre campagne ne sort.
  */
 
-const getPublicCompanyGallery = async (
-  req,
-  res
-) => {
-  disableGalleryCache(res);
+const getPublicCompanyGallery = async (req, res) => {
+  noCache(res);
+
+  const token = req.params.token;
+  const offset = getOffset(req.query.cursor);
+
+  if (
+    typeof token !== "string" ||
+    !/^[a-f0-9]{64}$/.test(token)
+  ) {
+    return res.status(404).json({
+      success: false,
+      message: "Lien de partage introuvable.",
+    });
+  }
+
+  if (offset === null) {
+    return res.status(400).json({
+      success: false,
+      message: "Pagination invalide.",
+    });
+  }
 
   try {
-    const token =
-      req.params.token;
-
-    if (
-      typeof token !== "string" ||
-      !/^[a-f0-9]{64}$/.test(token)
-    ) {
-      return res.status(404).json({
-        success: false,
-        message:
-          "Lien de partage introuvable.",
-      });
-    }
-
-    const offset = getPagination(
-      req.query.cursor
-    );
-
-    if (offset === null) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Pagination invalide.",
-      });
-    }
-
-    /*
-     * Vérification du lien public.
-     *
-     * On utilise toujours token_hash,
-     * et NON encrypted_token.
-     */
-
     const result = await db.query(
       `
       SELECT
-        s.company_id
-          AS "companyId",
-
-        s.expires_at
-          AS "expiresAt",
-
-        co.name
-          AS "companyName"
-
+        s.company_id AS "companyId",
+        s.campaign_id AS "campaignId",
+        s.expires_at AS "expiresAt",
+        co.name AS "companyName",
+        c.name AS "campaignName"
       FROM company_gallery_shares s
-
-      INNER JOIN companies co
+      JOIN companies co
         ON co.id = s.company_id
-
-      WHERE
-        s.token_hash = $1
-
+      JOIN campaigns c
+        ON c.id = s.campaign_id
+        AND c.company_id = co.id
+      WHERE s.token_hash = $1
         AND s.revoked_at IS NULL
-
         AND s.expires_at > NOW()
-
         AND co.status = 'ACTIVE'
-
       LIMIT 1
       `,
       [hashToken(token)]
     );
 
-    if (result.rows.length === 0) {
+    if (!result.rows.length) {
       return res.status(404).json({
         success: false,
         message:
@@ -1288,32 +850,24 @@ const getPublicCompanyGallery = async (
       });
     }
 
-    const share =
-      result.rows[0];
-
-    /*
-     * Les portraits proviennent uniquement
-     * de l'entreprise associée au lien.
-     */
+    const share = result.rows[0];
 
     const data = await fetchFinalPortraits(
       share.companyId,
+      share.campaignId,
       offset
     );
 
-    return res.status(200).json({
+    return res.json({
       success: true,
-
-      companyName:
-        share.companyName,
-
-      expiresAt:
-        share.expiresAt,
-
+      companyName: share.companyName,
+      campaignId: share.campaignId,
+      campaignName: share.campaignName,
+      expiresAt: share.expiresAt,
       data,
     });
   } catch (error) {
-    return sendGalleryError(
+    return fail(
       res,
       error,
       "Impossible de consulter la galerie."
@@ -1321,22 +875,11 @@ const getPublicCompanyGallery = async (
   }
 };
 
-/*
- * =========================================================
- * EXPORTS
- * =========================================================
- *
- * Les routes existantes continuent de fonctionner.
- */
-
 module.exports = {
   getCompanyGalleryPortraits,
-
+  getCompanyGalleryCampaigns,
   createCompanyGalleryShare,
-
   getCompanyGalleryShare,
-
   revokeCompanyGalleryShare,
-
   getPublicCompanyGallery,
 };

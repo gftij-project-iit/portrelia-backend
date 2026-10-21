@@ -11,6 +11,7 @@ const {
 const { authMiddleware } = require("../middlewares/authMiddleware");
 const { activateAccount } = require("../controllers/activateAccountController");
 const { getPublicCompanyGallery } = require("../controllers/company/getCompanyGalleryPortraits");
+const { forgotPassword, resetPassword } = require("../controllers/passwordResetController");
 
 const router = express.Router();
 
@@ -21,7 +22,11 @@ router.post("/login", login);
 
 // Galerie publique accessible avec un lien de partage
 router.get("/public/gallery/:token", getPublicCompanyGallery);
+// Mot de passe oublié — aucune connexion nécessaire
+router.post("/forgot-password", forgotPassword);
 
+// Nouveau mot de passe depuis le lien reçu par e-mail
+router.post("/reset-password", resetPassword);
 
 // Authentification
 router.get("/me", authMiddleware, me);

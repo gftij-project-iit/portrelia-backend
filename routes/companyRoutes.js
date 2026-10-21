@@ -11,7 +11,8 @@ const { cancelCampaign } = require("../controllers/company/cancelCampaign");
 const { addCampaignParticipants } = require("../controllers/company/addCampaignParticipants");
 const { resendCampaignInvitation } = require("../controllers/company/resendCampaignInvitation");
 const { getPlans, chooseFreePlan, preparePremiumPlan, openBillingPortal, getBillingInvoices } = require("../controllers/company/companySubscriptionController");
-const { getCompanyGalleryPortraits, getCompanyGalleryShare, createCompanyGalleryShare, revokeCompanyGalleryShare } = require("../controllers/company/getCompanyGalleryPortraits");
+const { getCompanyGalleryPortraits, getCompanyGalleryShare, createCompanyGalleryShare, revokeCompanyGalleryShare, getCompanyGalleryCampaigns } = require("../controllers/company/getCompanyGalleryPortraits");
+const { changePassword } = require("../controllers/company/changePassword");
 
 const router = express.Router();
 
@@ -51,13 +52,14 @@ router.post("/subscription/portal", openBillingPortal);
 router.get("/billing/invoices", getBillingInvoices);
 
 
+router.get("/gallery/campaigns", getCompanyGalleryCampaigns);
 router.get("/gallery/portraits", getCompanyGalleryPortraits);
-
 router.get("/gallery/share", getCompanyGalleryShare);
-
 router.post("/gallery/share", createCompanyGalleryShare);
-
 router.delete("/gallery/share", revokeCompanyGalleryShare);
+
+// Paramètres — modification du mot de passe
+router.patch("/settings/password", changePassword);
 
 
 

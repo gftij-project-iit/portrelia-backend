@@ -22,6 +22,7 @@ const { regenerateGeneratedPortrait } = require("../controllers/admin/adminPortr
 const { reviewGeneratedPortrait } = require("../controllers/admin/adminGeneratedPortraitReviewController");
 const { completePortraitQa } = require("../controllers/admin/adminPortraitQaCompleteController");
 const { getAdminGalleries } = require("../controllers/admin/adminGalleriesController");
+const { getAdminCompanyGalleryShare } = require("../controllers/admin/adminCompanyGalleryShareController");
 
 
 
@@ -56,6 +57,10 @@ router.post("/generated-portraits/:portraitId/regenerate",regenerateGeneratedPor
 router.patch("/generated-portraits/:portraitId/review",reviewGeneratedPortrait);
 router.post("/participants/:participantId/portraits-qa/complete", completePortraitQa);
 router.get("/galleries",getAdminGalleries);
+router.get(
+  "/companies/:companyId/campaigns/:campaignId/gallery-share",
+  getAdminCompanyGalleryShare
+);
 
 
 module.exports = router;
