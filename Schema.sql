@@ -1027,6 +1027,7 @@ CREATE TABLE IF NOT EXISTS company_gallery_shares (
   company_id BIGINT NOT NULL
     REFERENCES companies(id) ON DELETE CASCADE,
   token_hash VARCHAR(64) NOT NULL UNIQUE,
+  ncrypted_token TEXT,
   created_by_user_id BIGINT NOT NULL
     REFERENCES users(id),
   expires_at TIMESTAMPTZ NOT NULL,
