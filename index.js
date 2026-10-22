@@ -5,12 +5,16 @@ const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 
+// RATE LIMITING
+const { apiLimiter } = require("./middlewares/rateLimiting");
+
 const { dbConnect } = require("./config/db");
 const { testSupabaseConnection } = require("./config/supabase");
 const { testStripeConnection } = require("./config/stripe");
 const { stripeWebhook } = require("./controllers/company/stripeWebhookController");
 
 const router = require("./routes/routes");
+
 
 const app = express();
 
@@ -38,6 +42,9 @@ dbConnect();
 testSupabaseConnection();
 testStripeConnection();
 
+// RATE LIMITING GLOBAL
+app.use("/api/v1", apiLimiter);
+
 // Routes publiques et authentification
 app.use("/api/v1", router);
 
@@ -52,7 +59,7 @@ app.use("/api/v1/participant", require("./routes/participantRoutes"));
 
 const start = async () => {
   try {
-    const port = process.env.PORT ;
+    const port = process.env.PORT;
 
     app.listen(port, () => {
       console.log(`Auth service running on http://localhost:${port}`);
