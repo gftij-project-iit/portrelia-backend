@@ -13,6 +13,7 @@ const { resendCampaignInvitation } = require("../controllers/company/resendCampa
 const { getPlans, chooseFreePlan, preparePremiumPlan, openBillingPortal, getBillingInvoices } = require("../controllers/company/companySubscriptionController");
 const { getCompanyGalleryPortraits, getCompanyGalleryShare, createCompanyGalleryShare, revokeCompanyGalleryShare, getCompanyGalleryCampaigns } = require("../controllers/company/getCompanyGalleryPortraits");
 const { changePassword } = require("../controllers/company/changePassword");
+const { invitationLimiter } = require("../middlewares/rateLimiting");
 
 const router = express.Router();
 
@@ -22,6 +23,7 @@ router.use(roleMiddleware("COMPANY_ADMIN"));
 
 // Invitations collaborateurs
 router.post( "/campaigns/:id/invitations/:invitationId/resend",
+  invitationLimiter,
   resendCampaignInvitation);
 
 router.get("/plans",getPlans);

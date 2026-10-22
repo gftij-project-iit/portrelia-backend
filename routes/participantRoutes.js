@@ -11,6 +11,7 @@ const { participantInvitationMiddleware } = require("../middlewares/participantI
 const { participantPhotoUpload } = require("../middlewares/participantPhotoUpload");
 const { getParticipantGallery } = require("../controllers/participant/getParticipantGallery");
 const { selectParticipantPortrait } = require("../controllers/participant/selectParticipantPortrait");
+const { uploadLimiter } = require("../middlewares/rateLimiting");
 
 const router = express.Router();
 
@@ -44,6 +45,7 @@ router.get(
 router.post(
   "/invitations/:token/photos",
   participantInvitationMiddleware,
+  uploadLimiter,
   participantPhotoUpload,
   uploadParticipantPhotos
 );
