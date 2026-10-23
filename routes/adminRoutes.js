@@ -23,6 +23,7 @@ const { reviewGeneratedPortrait } = require("../controllers/admin/adminGenerated
 const { completePortraitQa } = require("../controllers/admin/adminPortraitQaCompleteController");
 const { getAdminGalleries } = require("../controllers/admin/adminGalleriesController");
 const { getAdminCompanyGalleryShare } = require("../controllers/admin/adminCompanyGalleryShareController");
+const { getAdminDashboard } = require("../controllers/admin/adminDashboardController");
 
 
 
@@ -31,6 +32,9 @@ const router = express.Router();
 // Toutes les routes ici = ADMIN uniquement
 router.use(authMiddleware);
 router.use(roleMiddleware("ADMIN"));
+
+// Tableau de bord
+router.get("/dashboard", getAdminDashboard);
 
 // Demandes de démo
 router.get("/demo-requests", getAdminDemoRequests);

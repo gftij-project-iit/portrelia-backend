@@ -14,12 +14,18 @@ const { getPlans, chooseFreePlan, preparePremiumPlan, openBillingPortal, getBill
 const { getCompanyGalleryPortraits, getCompanyGalleryShare, createCompanyGalleryShare, revokeCompanyGalleryShare, getCompanyGalleryCampaigns } = require("../controllers/company/getCompanyGalleryPortraits");
 const { changePassword } = require("../controllers/company/changePassword");
 const { invitationLimiter } = require("../middlewares/rateLimiting");
+const { getCompanyDashboard } = require("../controllers/company/getCompanyDashboard");
 
 const router = express.Router();
 
 // Toutes les routes ici = COMPANY_ADMIN uniquement
 router.use(authMiddleware);
 router.use(roleMiddleware("COMPANY_ADMIN"));
+
+
+// Tableau de bord
+router.get("/dashboard", getCompanyDashboard);
+
 
 // Invitations collaborateurs
 router.post( "/campaigns/:id/invitations/:invitationId/resend",
